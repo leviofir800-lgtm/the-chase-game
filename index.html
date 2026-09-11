@@ -20,6 +20,7 @@
    הצ'ייסר — studio theme
    ============================================================ */
 :root{
+  color-scheme:dark;
   --bg:#04060e; --panel-1:rgba(19,28,54,.92); --panel-2:rgba(10,16,32,.92);
   --gold:#f5c518; --gold-2:#ffe27a; --player:#38bdf8; --chaser:#ef4444;
   --ink:#e9eefb; --muted:#93a4c8; --ok:#22c55e; --bad:#ef4444;
@@ -995,10 +996,20 @@ function mountTopBar(){
     s.textContent = Sound.muted ? '🔇' : '🔊';
     if (Sound.muted) Sound.musicStop();
   });
+  /* יציאה בשני שלבים במקום חלונית מערכת — עובד גם במסגרת מוגבלת וגם בטלפון */
   const q = $('#btn-quit');
-  if (q) q.addEventListener('click', () => {
-    if (confirm('לצאת מהמשחק ולחזור לתפריט? ההתקדמות תאבד.')){ Sound.musicStop(); go('menu'); }
-  });
+  if (q){
+    let armed = false, revert = null;
+    const reset = () => { armed = false; q.textContent = 'יציאה לתפריט'; q.classList.remove('btn-bad'); };
+    q.addEventListener('click', () => {
+      if (armed){ clearTimeout(revert); Sound.musicStop(); go('menu'); return; }
+      armed = true;
+      q.textContent = 'בטוח? לחצו שוב';
+      q.classList.add('btn-bad');
+      Sound.init(); Sound.beep();
+      revert = addTimeout(reset, 3000);
+    });
+  }
 }
 </script>
 <script>
@@ -1120,7 +1131,7 @@ Screens.custom = {
         </div>
         <button class="btn btn-gold btn-lg" type="submit">➕ הוספה למאגר</button>
         <p class="muted text-xs">
-          השאלות נשמרות בדפדפן הזה בלבד. אפשר לייצא אותן לקובץ ולטעון אותן במכשיר אחר.
+          השאלות נשמרות בדפדפן הזה בלבד. אפשר לייצא אותן (קובץ או העתקת טקסט) ולטעון אותן במכשיר אחר.
         </p>
       </form>
 
@@ -1133,6 +1144,9 @@ Screens.custom = {
             <input type="file" accept="application/json,.json" id="c-file" class="hidden">
           </div>
         </div>
+        <div id="c-msg" class="text-sm font-bold"></div>
+        <textarea id="c-json" class="field hidden" rows="4" spellcheck="false"
+                  placeholder="כאן יופיע ה-JSON לייצוא — או הדביקו כאן JSON כדי לייבא"></textarea>
         <div class="scroll grid gap-2" id="c-list"></div>
       </div>
     </div>
@@ -1179,32 +1193,66 @@ Screens.custom = {
       paint();
     });
 
-    $('#c-export').addEventListener('click', () => {
-      const blob = new Blob([JSON.stringify(customQuestions(), null, 2)], { type:'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = 'chase-family-questions.json';
-      document.body.appendChild(a); a.click(); a.remove();
-      addTimeout(() => URL.revokeObjectURL(url), 2000);
+    const say = (msg, bad) => {
+      const el = $('#c-msg');
+      el.textContent = msg;
+      el.className = 'text-sm font-bold ' + (bad ? 'text-red-300' : 'text-green-300');
+      addTimeout(() => { el.textContent = ''; }, 6000);
+    };
+
+    /* ייצוא: הטקסט להעתקה מוצג תמיד, כי הורדת קובץ חסומה בחלק מהסביבות.
+       בדף מפורסם השמירה עוברת דרך ה-runtime ומבקשת אישור מהצופה. */
+    $('#c-export').addEventListener('click', async () => {
+      const json = JSON.stringify(customQuestions(), null, 2);
+      const box = $('#c-json');
+      box.value = json;
+      box.classList.remove('hidden');
+      box.focus(); box.select();
+      say('העתיקו את הטקסט שלמטה — או שמרו כקובץ, אם הסביבה מאפשרת.');
+
+      let downloads = null;
+      try { downloads = (window.claude && claude.use) ? await claude.use('downloads') : null; } catch(err){ downloads = null; }
+      if (downloads){
+        try {
+          await downloads.save({ filename:'chase-family-questions.json', data: json });
+          say('הקובץ נשמר.');
+        } catch(err){ /* הצופה ביטל — הטקסט למעלה עדיין זמין להעתקה */ }
+        return;
+      }
+      try {
+        const blob = new Blob([json], { type:'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'chase-family-questions.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        addTimeout(() => URL.revokeObjectURL(url), 2000);
+      } catch(err){ /* הטקסט למעלה הוא הדרך החלופית */ }
     });
+
     $('#c-import').addEventListener('click', () => $('#c-file').click());
+    const loadJson = text => {
+      try {
+        const data = JSON.parse(text);
+        if (!Array.isArray(data)) throw 0;
+        const ok = data.filter(x => x && x.q && x.a && x.w1 && x.w2)
+                       .map(x => ({ q:String(x.q), a:String(x.a), w1:String(x.w1), w2:String(x.w2) }));
+        if (!ok.length) return say('לא נמצאו שאלות תקינות בקובץ.', true);
+        Store.set(KEY_CUSTOM, customQuestions().concat(ok));
+        paint(); Sound.correct();
+        say(`נוספו ${ok.length} שאלות.`);
+      } catch(err){ say('הטקסט אינו בפורמט הנכון.', true); }
+    };
     $('#c-file').addEventListener('change', e => {
       const f = e.target.files[0];
       if (!f) return;
       const r = new FileReader();
-      r.onload = () => {
-        try {
-          const data = JSON.parse(r.result);
-          if (!Array.isArray(data)) throw 0;
-          const ok = data.filter(x => x && x.q && x.a && x.w1 && x.w2)
-                         .map(x => ({ q:String(x.q), a:String(x.a), w1:String(x.w1), w2:String(x.w2) }));
-          Store.set(KEY_CUSTOM, customQuestions().concat(ok));
-          paint(); Sound.correct();
-          alert(`נוספו ${ok.length} שאלות.`);
-        } catch(err){ alert('הקובץ אינו בפורמט הנכון.'); }
-      };
+      r.onload = () => loadJson(r.result);
       r.readAsText(f);
       e.target.value = '';
+    });
+    /* הדבקת JSON ישירות לתיבה — הדרך היחידה לייבא כשאין גישה לקבצים */
+    $('#c-json').addEventListener('paste', e => {
+      addTimeout(() => { if ($('#c-json').value.trim()) loadJson($('#c-json').value); }, 60);
     });
 
     $('#c-play').addEventListener('click', () => go('setup'));
