@@ -164,6 +164,13 @@ label.pick.on{border-color:var(--gold); background:rgba(245,197,24,.14)}
 .opt.right{border-color:var(--ok)!important; background:rgba(34,197,94,.24)!important}
 .opt.wrongpick{border-color:var(--bad)!important; background:rgba(239,68,68,.2)!important}
 
+/* ---------- כרטיס המנחה ---------- */
+.judgecard{
+  border-top:1px dashed rgba(255,255,255,.16); padding-top:.7rem; margin-top:.2rem;
+  display:flex; align-items:center; gap:.6rem; flex-wrap:wrap; min-height:46px;
+}
+.judgetext{font-size:clamp(1rem,2.4vw,1.35rem); font-weight:900; color:var(--gold-2)}
+
 /* ---------- chase board ---------- */
 .board{display:flex; flex-direction:column; gap:6px; height:clamp(280px,44vh,520px)}
 @media (min-width:1024px){ .board{height:clamp(380px,62vh,560px)} }
@@ -894,6 +901,7 @@ const state = {
   current: 0,
   chaser: CHASERS.medium,
   hostMode: 'ai',            // 'ai' | 'human'
+  answerMode: 'host',        // 'host' = התשובה גלויה למנחה | 'shared' = מוסתרת עד לחיצה
   cats: Object.keys(CATS).filter(k => k !== 'fam'),
   useFamily: true,
   pool: [], used: new Set(),
@@ -976,6 +984,74 @@ function countdown(el, done){
 }
 
 /* ---------- כותרת עליונה משותפת ---------- */
+/* ============================================================
+   כרטיס המנחה — התשובה הנכונה, לעיני מי שמחליט אם לאשר
+   במצב 'host' התשובה גלויה מיד (המנחה מקריא את השאלה בקול);
+   במצב 'shared', כשכולם רואים את המסך, היא מוסתרת עד לחיצה.
+   ============================================================ */
+const Judge = {
+  answer: '', shown: false,
+
+  html(){
+    return `
+    <div class="judgecard" id="judgecard">
+      <button type="button" class="btn btn-icon" id="judge-peek">👁 הצג תשובה <span class="kbd">↑</span></button>
+      <div class="row" id="judge-answer" hidden>
+        <span class="chip" id="judge-label">התשובה</span>
+        <b class="judgetext" id="judge-text"></b>
+      </div>
+    </div>`;
+  },
+
+  mount(){
+    const peek = $('#judge-peek');
+    if (peek) peek.addEventListener('click', () => this.reveal());
+  },
+
+  /* שאלה חדשה נשלפה */
+  set(answer){
+    this.answer = answer || '';
+    this.shown = false;
+    const text = $('#judge-text'), box = $('#judge-answer'), peek = $('#judge-peek');
+    if (!text) return;
+    text.textContent = this.answer;
+    $('#judge-label').textContent = 'התשובה';
+    $('#judge-label').className = 'chip';
+    if (state.answerMode === 'shared'){
+      box.hidden = true;
+      if (peek) peek.hidden = false;
+    } else {
+      box.hidden = false;
+      if (peek) peek.hidden = true;
+      this.shown = true;
+    }
+  },
+
+  /* הסתרה מפורשת — כשאין מה לשפוט (הצ׳ייסר הממוחשב עונה בעצמו) */
+  hide(){
+    const box = $('#judge-answer'), peek = $('#judge-peek');
+    if (!box) return;
+    box.hidden = true;
+    if (peek) peek.hidden = true;
+    this.shown = false;
+  },
+
+  /* חשיפה יזומה, וגם אחרי כל שיפוט — כדי שכולם ילמדו את התשובה */
+  reveal(kind){
+    const box = $('#judge-answer'), peek = $('#judge-peek');
+    if (!box) return;
+    box.hidden = false;
+    if (peek) peek.hidden = true;
+    this.shown = true;
+    if (kind){
+      const label = $('#judge-label');
+      label.textContent = kind === 'ok' ? '✔ נכון' : '✘ התשובה הייתה';
+      label.className = 'chip ' + (kind === 'ok' ? 'chip-gold' : 'chip-chaser');
+    }
+  }
+};
+
+
 function topBar(title, sub){
   return `
   <header class="spread mb-4">
@@ -1070,7 +1146,10 @@ Screens.rules = {
       ${rule(1, 'צבירת כסף', `
         לכל שחקן/ית יש <b>60 שניות</b>. השאלה מוקראת, עונים בקול, ומי שמפעיל את המסך לוחץ
         <b class="text-green-300">נכון</b> או <b class="text-red-300">לא נכון</b>. כל תשובה נכונה שווה
-        <b>1,000 ₪</b> לקופה האישית. אפשר ללחוץ <b>דלג</b> ולחזור לשאלה בהמשך.`)}
+        <b>1,000 ₪</b> לקופה האישית. אפשר ללחוץ <b>דלג</b> ולחזור לשאלה בהמשך.<br>
+        <b>התשובה הנכונה מוצגת למי שמשפט</b>, מתחת לשאלה — בדיוק כמו הכרטיס של המנחה בתוכנית.
+        אם המסך מונח במקום שכולם רואים, בחרו בהגדרות <b>"מסך שכולם רואים"</b> והתשובה תוסתר
+        עד שתלחצו <b>הצג תשובה</b>.`)}
       ${rule(2, 'המרדף האישי', `
         הצ׳ייסר מציע שלוש אפשרויות: <b>הצעה נמוכה</b> (מתחילים צעד אחד קרוב יותר לבית),
         <b>הסכום שצברתם</b> (התחלה רגילה) או <b>הצעה גבוהה</b> (הרבה יותר כסף, אבל מתחילים צעד אחד
@@ -1270,6 +1349,7 @@ Screens.setup = {
     const count = saved.count || 2;
     const lvl   = saved.level || 'medium';
     const host  = saved.hostMode || 'ai';
+    const ansMode = saved.answerMode || 'host';
     const cats  = saved.cats || Object.keys(CATS).filter(k => k !== 'fam');
     const famN  = customQuestions().length;
 
@@ -1320,6 +1400,17 @@ Screens.setup = {
             <div class="muted text-sm mt-1">אחד מכם משחק את הצ׳ייסר ובוחר את תשובותיו.</div>
           </button>
         </div>
+        <b class="text-lg mt-1">מי רואה את התשובה?</b>
+        <div class="grid-2">
+          <button type="button" class="card-pick ${ansMode === 'host' ? 'on' : ''}" data-ansmode="host">
+            <div class="row"><span class="text-2xl">📱</span><b>המכשיר ביד המנחה</b></div>
+            <div class="muted text-sm mt-1">התשובה מוצגת מתחת לשאלה. מקריאים בקול ומשפטים מיד.</div>
+          </button>
+          <button type="button" class="card-pick ${ansMode === 'shared' ? 'on' : ''}" data-ansmode="shared">
+            <div class="row"><span class="text-2xl">📺</span><b>מסך שכולם רואים</b></div>
+            <div class="muted text-sm mt-1">התשובה מוסתרת עד שלוחצים "הצג תשובה".</div>
+          </button>
+        </div>
         <b class="text-lg mt-1">נושאים</b>
         <div class="grid-2" id="s-cats">${Object.keys(RAW).map(catBox).join('')}</div>
         <label class="pick ${famN ? '' : 'opacity-50'}" id="s-fambox">
@@ -1349,6 +1440,7 @@ Screens.setup = {
     let count = saved.count || 2;
     let level = saved.level || 'medium';
     let host  = saved.hostMode || 'ai';
+    let ansMode = saved.answerMode || 'host';
 
     const paintCount = () => {
       $$('[data-count]').forEach(b => b.classList.toggle('btn-gold', +b.dataset.count === count));
@@ -1367,6 +1459,11 @@ Screens.setup = {
       $$('[data-host]').forEach(b => b.classList.toggle('on', b.dataset.host === host));
       Sound.init(); Sound.beep();
     });
+    bind('[data-ansmode]', 'click', e => {
+      ansMode = e.currentTarget.dataset.ansmode;
+      $$('[data-ansmode]').forEach(b => b.classList.toggle('on', b.dataset.ansmode === ansMode));
+      Sound.init(); Sound.beep();
+    });
     bind('[data-cat]', 'change', e => {
       e.currentTarget.closest('label').classList.toggle('on', e.currentTarget.checked);
     });
@@ -1383,12 +1480,13 @@ Screens.setup = {
       state.current   = 0;
       state.chaser    = CHASERS[level];
       state.hostMode  = host;
+      state.answerMode = ansMode;
       state.cats      = cats;
       state.useFamily = $('#s-fam').checked && customQuestions().length > 0;
       state.teamBank  = 0;
       buildPool();
 
-      Store.set(KEY_SETTINGS, { ...Store.get(KEY_SETTINGS, {}), names, count, level, hostMode: host, cats });
+      Store.set(KEY_SETTINGS, { ...Store.get(KEY_SETTINGS, {}), names, count, level, hostMode: host, answerMode: ansMode, cats });
       Sound.init(); Sound.offer();
       go('ready');
     });
@@ -1466,7 +1564,7 @@ Screens.cash = {
       <div class="panel panel-pad qbox grid content-center gap-3" id="qcard" aria-live="polite">
         <div class="row"><span class="chip" id="qcat">—</span></div>
         <div class="qtext" id="q">…</div>
-        <div class="text-lg font-black text-green-300 hidden" id="reveal"></div>
+        ${Judge.html()}
       </div>
 
       <div class="grid gap-2 sm:grid-cols-3">
@@ -1490,7 +1588,7 @@ Screens.cash = {
       st.q = (st.passQueue.length && st.asked % 4 === 0) ? st.passQueue.shift() : nextQuestion();
       $('#qcat').textContent = CATS[st.q.cat].icon + ' ' + CATS[st.q.cat].name;
       $('#q').textContent = st.q.q;
-      $('#reveal').classList.add('hidden');
+      Judge.set(st.q.a);
       st.locked = false;
     };
 
@@ -1506,10 +1604,11 @@ Screens.cash = {
       if (kind === 'ok'){
         st.right++; st.bank += 1000; Sound.correct();
         card.classList.remove('flash-bad'); card.classList.add('flash-ok');
+        Judge.reveal('ok');
       } else if (kind === 'no'){
         st.wrong++; Sound.wrong();
         card.classList.remove('flash-ok'); card.classList.add('flash-bad');
-        const r = $('#reveal'); r.textContent = 'התשובה: ' + st.q.a; r.classList.remove('hidden');
+        Judge.reveal('no');
       } else {
         st.passed++; st.passQueue.push(st.q); Sound.pass();
       }
@@ -1542,7 +1641,9 @@ Screens.cash = {
     $('#b-ok').addEventListener('click', () => judge('ok'));
     $('#b-no').addEventListener('click', () => judge('no'));
     $('#b-pass').addEventListener('click', () => judge('pass'));
+    Judge.mount();
     onKeys({
+      ArrowUp:    () => Judge.reveal(),
       ArrowLeft:  () => judge('ok'),
       ArrowRight: () => judge('no'),
       ' ':        () => judge('pass'),
@@ -1979,7 +2080,7 @@ Screens.finalTeam = {
       <div class="panel panel-pad qbox grid content-center gap-3" id="qcard" aria-live="polite">
         <div class="row"><span class="chip" id="qcat">—</span></div>
         <div class="qtext" id="q">…</div>
-        <div class="text-lg font-black text-green-300 hidden" id="reveal"></div>
+        ${Judge.html()}
       </div>
 
       <div class="grid gap-2 sm:grid-cols-3">
@@ -2000,7 +2101,7 @@ Screens.finalTeam = {
       q = (passQueue.length && asked % 4 === 0) ? passQueue.shift() : nextQuestion();
       $('#qcat').textContent = CATS[q.cat].icon + ' ' + CATS[q.cat].name;
       $('#q').textContent = q.q;
-      $('#reveal').classList.add('hidden');
+      Judge.set(q.a);
       locked = false;
     };
     const judge = kind => {
@@ -2011,9 +2112,10 @@ Screens.finalTeam = {
         f.right++; f.teamSteps++; $('#steps').textContent = f.teamSteps;
         $('#steps').classList.remove('pop'); void $('#steps').offsetWidth; $('#steps').classList.add('pop');
         Sound.correct(); card.classList.add('flash-ok');
+        Judge.reveal('ok');
       } else if (kind === 'no'){
         f.wrong++; Sound.wrong(); card.classList.add('flash-bad');
-        const r = $('#reveal'); r.textContent = 'התשובה: ' + q.a; r.classList.remove('hidden');
+        Judge.reveal('no');
       } else { f.passed++; passQueue.push(q); Sound.pass(); }
       $('#tally').textContent = `${f.right} נכונות · ${f.wrong} שגויות`;
       addTimeout(() => {
@@ -2044,7 +2146,9 @@ Screens.finalTeam = {
     $('#b-ok').addEventListener('click', () => judge('ok'));
     $('#b-no').addEventListener('click', () => judge('no'));
     $('#b-pass').addEventListener('click', () => judge('pass'));
+    Judge.mount();
     onKeys({
+      ArrowUp: () => Judge.reveal(),
       ArrowLeft: () => judge('ok'), ArrowRight: () => judge('no'), ' ': () => judge('pass'),
       '1': () => judge('ok'), '2': () => judge('no'), '3': () => judge('pass')
     });
@@ -2095,7 +2199,7 @@ Screens.finalChaser = {
             <span class="chip chip-chaser" id="status">${state.chaser.emoji} חושב…</span>
           </div>
           <div class="qtext" id="q">…</div>
-          <div class="text-lg font-black hidden" id="reveal"></div>
+          ${Judge.html()}
         </div>
         ${hostPanel}
       </div>
@@ -2152,9 +2256,12 @@ Screens.finalChaser = {
       q = nextQuestion();
       $('#qcat').textContent = CATS[q.cat].icon + ' ' + CATS[q.cat].name;
       $('#q').textContent = q.q;
-      $('#reveal').classList.add('hidden');
       $('#status').textContent = state.chaser.emoji + ' חושב…';
       $('#status').className = 'chip chip-chaser';
+      /* מנחה אנושי מסמן אם הצ׳ייסר צדק — ולשם כך הוא חייב לראות את התשובה.
+         כשהמחשב עונה אין מה לשפוט, ולכן התשובה נשארת מוסתרת עד הגילוי. */
+      Judge.set(q.a);
+      if (state.hostMode === 'ai') Judge.hide();
 
       if (state.hostMode === 'ai'){
         const think = T(state.chaser.pace * 1000 * rnd(.7, 1.3));
@@ -2174,10 +2281,7 @@ Screens.finalChaser = {
       if (busy || over) return;
       busy = true;
       ['#c-ok', '#c-no'].forEach(s => { const b = $(s); if (b) b.disabled = true; });
-      const r = $('#reveal');
-      r.classList.remove('hidden', 'text-green-300', 'text-red-300');
-      r.textContent = 'התשובה: ' + q.a;
-      r.classList.add(ok ? 'text-green-300' : 'text-red-300');
+      Judge.reveal(ok ? 'ok' : 'no');
 
       if (ok){
         f.chaserSteps++;
@@ -2245,6 +2349,7 @@ Screens.finalChaser = {
       });
     }
 
+    Judge.mount();
     if (state.hostMode === 'human'){
       $('#c-ok').addEventListener('click', () => verdict(true));
       $('#c-no').addEventListener('click', () => verdict(false));

@@ -115,6 +115,7 @@ async function run(tag, viewport){
   await page.fill('[data-name="0"]', 'נועה');
   await page.fill('[data-name="1"]', 'איתי');
   await page.click('[data-lvl="medium"]');
+  await page.click('[data-ansmode="host"]');
   await shot(page, tag, '03-setup');
   await page.click('#s-start');
 
@@ -123,6 +124,18 @@ async function run(tag, viewport){
   await shot(page, tag, '04-ready');
   await page.click('#go');
   await waitScreen(page, 'cash');
+
+  // מי שמשפט חייב לראות את התשובה עוד לפני שהוא מחליט
+  await page.waitForSelector('#judge-text');
+  const card = await page.evaluate(() => ({
+    shown:  !document.getElementById('judge-answer').hidden,
+    text:   document.getElementById('judge-text').textContent.trim(),
+    answer: window.__chase.state.cash.q.a
+  }));
+  (card.shown && card.text && card.text === card.answer)
+    ? ok(`כרטיס המנחה מציג את התשובה מראש ("${card.text}")`)
+    : fail('התשובה אינה גלויה למנחה לפני השיפוט: ' + JSON.stringify(card));
+
   for (let i = 0; i < 6; i++){
     if (await page.isEnabled('#b-ok').catch(() => false)) await page.click('#b-ok');
     await page.waitForTimeout(120);
@@ -209,9 +222,49 @@ async function run(tag, viewport){
   await browser.close();
 }
 
+/** מצב "מסך שכולם רואים": התשובה מוסתרת עד שלוחצים להציג */
+async function runSharedScreen(){
+  console.log('\n▶ מצב מסך משותף');
+  const browser = await chromium.launch();
+  const page = await (await browser.newContext({ viewport:{ width:1280, height:900 }, locale:'he-IL' })).newPage();
+  await page.goto(URL_, { waitUntil:'domcontentloaded' });
+
+  await page.click('#m-new');
+  await page.waitForSelector('#s-start');
+  await page.click('[data-count="1"]');
+  await page.click('[data-ansmode="shared"]');
+  await page.click('#s-start');
+  await waitScreen(page, 'ready');
+  await page.click('#go');
+  await waitScreen(page, 'cash');
+  await page.waitForSelector('#judge-peek');
+
+  const before = await page.evaluate(() => ({
+    hidden: document.getElementById('judge-answer').hidden,
+    peek:  !document.getElementById('judge-peek').hidden
+  }));
+  (before.hidden && before.peek)
+    ? ok('במסך משותף התשובה מוסתרת ומוצע כפתור הצגה')
+    : fail('התשובה דלפה במצב מסך משותף: ' + JSON.stringify(before));
+
+  await page.click('#judge-peek');
+  const after = await page.evaluate(() => ({
+    shown: !document.getElementById('judge-answer').hidden,
+    text:   document.getElementById('judge-text').textContent.trim(),
+    answer: window.__chase.state.cash.q.a
+  }));
+  (after.shown && after.text === after.answer)
+    ? ok('לחיצה על "הצג תשובה" חושפת את התשובה הנכונה')
+    : fail('הצגת התשובה נכשלה: ' + JSON.stringify(after));
+
+  await page.screenshot({ path: path.join(SHOTS, 'shared-peek.png') });
+  await browser.close();
+}
+
 console.log('בדיקת עשן — הצ׳ייסר\nכתובת: ' + URL_);
 await run('desktop', { width: 1280, height: 900 });
 await run('mobile',  { width: 390,  height: 844 });
+await runSharedScreen();
 
 console.log('\nצילומי מסך: ' + SHOTS);
 if (failures){
