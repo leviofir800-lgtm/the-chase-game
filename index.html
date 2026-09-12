@@ -1045,6 +1045,9 @@ function countdown(el, done){
    ============================================================ */
 const Judge = {
   answer: '', shown: false,
+  /* shown = גלוי למנחה על מסכו. revealed = נחשף לכולם אחרי שיפוט —
+     ורק זה נכנס לשידור למסך ההקרנה ולמסך הצ׳ייסר. */
+  revealed: false,
 
   html(){
     return `
@@ -1066,6 +1069,7 @@ const Judge = {
   set(answer){
     this.answer = answer || '';
     this.shown = false;
+    this.revealed = false;
     const text = $('#judge-text'), box = $('#judge-answer'), peek = $('#judge-peek');
     if (!text) return;
     text.textContent = this.answer;
@@ -1088,6 +1092,7 @@ const Judge = {
     box.hidden = true;
     if (peek) peek.hidden = true;
     this.shown = false;
+    this.revealed = false;
   },
 
   /* חשיפה יזומה, וגם אחרי כל שיפוט — כדי שכולם ילמדו את התשובה */
@@ -1098,6 +1103,7 @@ const Judge = {
     if (peek) peek.hidden = true;
     this.shown = true;
     if (kind){
+      this.revealed = true;
       const label = $('#judge-label');
       label.textContent = kind === 'ok' ? '✔ נכון' : '✘ התשובה הייתה';
       label.className = 'chip ' + (kind === 'ok' ? 'chip-gold' : 'chip-chaser');
@@ -1219,6 +1225,9 @@ Screens.rules = {
         <div class="muted text-sm leading-relaxed">
           <b>צ׳ייסר ממוחשב</b> — המחשב עונה לבד לפי רמת הקושי שבחרתם.<br>
           <b>מנחה אנושי</b> — מישהו מהמשפחה משחק את הצ׳ייסר ובוחר עבורו את התשובות.<br>
+          <b>שלושה מסכים</b> — אפשר לפתוח את אותו קישור בכמה מכשירים ולחלק תפקידים:
+          <b>מסך הקרנה</b> לטלוויזיה, <b>מסך מנחה</b> בטלפון שמריץ את המשחק, ו<b>מסך צ׳ייסר</b>
+          לשחקן שמשחק את הנבל — הוא רואה רק את השאלה ואת האפשרויות, אף פעם לא את התשובה.<br>
           ב־<b>טריוויה משפחתית</b> אפשר להוסיף שאלות משלכם — והצ׳ייסר, למרבה השמחה, גרוע בהן.
         </div>
       </div>
@@ -2042,6 +2051,17 @@ Screens.chase = {
     }
 
     if (state.hostMode === 'human') bind('[data-cpick]', 'click', e => chaserPick(+e.currentTarget.dataset.cpick));
+    /* צ׳ייסר שמשחק מטלפון נפרד — הבחירה שלו מגיעה דרך החדר */
+    if (state.device === 'host' && state.hostMode === 'human' && Net.ready){
+      addCleanup(Net.watchPeers(peers => {
+        for (const peer of peers){
+          const pr = peer.presence;
+          if (pr && pr.role === 'chaser' && pr.pick && pr.pick.qn === st.qn && typeof pr.pick.i === 'number'){
+            chaserPick(pr.pick.i);
+          }
+        }
+      }));
+    }
     onKeys({
       Digit1: () => playerPick(0), Digit2: () => playerPick(1), Digit3: () => playerPick(2),
       KeyA:   () => playerPick(0), KeyS:   () => playerPick(1), KeyD:   () => playerPick(2)
@@ -2509,6 +2529,21 @@ const Net = {
     try { this.room.presence({ role: 'screen', snap: null }); } catch(e){}
   },
 
+  /* כל מי שנמצא בחדר — לקריאת בחירת הצ׳ייסר */
+  watchPeers(cb){
+    if (!this.room) return () => {};
+    const fire = () => cb(this.room.peers());
+    const un = this.room.onPeers(fire, () => {});
+    fire();
+    return un;
+  },
+
+  /* הצ׳ייסר משדר את הבחירה שלו; המנחה קורא אותה */
+  sendPick(qn, i){
+    if (!this.room) return;
+    try { this.room.presence({ role: 'chaser', pick: { qn, i } }); } catch(e){}
+  },
+
   /* מסך ההקרנה מאזין למנחה העדכני ביותר */
   watch(cb){
     if (!this.room) { cb(null); return () => {}; }
@@ -2581,7 +2616,7 @@ function buildSnap(){
   }
 
   /* התשובה משודרת רק אחרי החשיפה */
-  if (Judge.shown && Judge.answer) snap.answer = Judge.answer;
+  if (Judge.revealed && Judge.answer) snap.answer = Judge.answer;
   return snap;
 }
 
@@ -2614,6 +2649,10 @@ Screens.role = {
           <div class="row"><span class="text-2xl">📱</span><b class="text-lg">מסך מנחה</b></div>
           <div class="muted text-sm mt-1">הטלפון שביד. מריץ את המשחק, רואה את התשובות ושולט בהכול.</div>
         </button>
+        <button class="card-pick" id="r-chaser">
+          <div class="row"><span class="text-2xl">😈</span><b class="text-lg">מסך הצ׳ייסר</b></div>
+          <div class="muted text-sm mt-1">טלפון של מי שמשחק את הצ׳ייסר. רואה רק את השאלה ואת שלוש האפשרויות — אף פעם לא את התשובה.</div>
+        </button>
         <button class="card-pick" id="r-solo">
           <div class="row"><span class="text-2xl">🎮</span><b class="text-lg">מסך אחד</b></div>
           <div class="muted text-sm mt-1">כמו עד היום — הכול על מכשיר אחד.</div>
@@ -2627,17 +2666,17 @@ Screens.role = {
     note.textContent = Net.ready
       ? 'שני המכשירים כבר מחוברים זה לזה.'
       : 'אין חיבור בין מכשירים כאן — אפשר לשחק על מסך אחד.';
-    $('#r-screen').disabled = !Net.ready;
-    $('#r-host').disabled   = !Net.ready;
-    if (!Net.ready){
-      $('#r-screen').style.opacity = $('#r-host').style.opacity = '.4';
-      $('#r-screen').style.cursor  = $('#r-host').style.cursor  = 'not-allowed';
-    }
+    ['#r-screen', '#r-host', '#r-chaser'].forEach(sel => {
+      const b = $(sel);
+      b.disabled = !Net.ready;
+      if (!Net.ready){ b.style.opacity = '.4'; b.style.cursor = 'not-allowed'; }
+    });
     $('#r-solo').addEventListener('click', () => { state.device = 'solo'; Sound.init(); go('menu'); });
     $('#r-host').addEventListener('click', () => {
       state.device = 'host'; Sound.init(); startBroadcast(); go('menu');
     });
     $('#r-screen').addEventListener('click', () => { state.device = 'screen'; Net.standby(); go('projector'); });
+    $('#r-chaser').addEventListener('click', () => { state.device = 'chaser'; Sound.init(); go('chaserPhone'); });
   }
 };
 
@@ -2675,6 +2714,97 @@ Screens.projector = {
       el.textContent = el.dataset.fmt === 'mmss' ? mmss(left) : Math.ceil(left / 1000);
     }, 200);
     addCleanup(() => clearInterval(tick));
+  }
+};
+
+
+/* ============================================================
+   מסך הצ׳ייסר — טלפון של מי שמשחק את הנבל.
+   רואה את השאלה ואת האפשרויות, נועל תשובה, ולעולם לא רואה
+   את התשובה הנכונה: היא לא נכנסת לשידור לפני החשיפה.
+   ============================================================ */
+Screens.chaserPhone = {
+  html(){
+    return `
+    <div class="grid gap-3" id="chp">
+      <div class="spread">
+        <span class="chip chip-chaser">😈 אתם הצ׳ייסר</span>
+        <button class="btn btn-icon" id="chp-exit">החלפת תפקיד</button>
+      </div>
+      <div id="chp-body"></div>
+    </div>`;
+  },
+  mount(){
+    $('#chp-exit').addEventListener('click', () => { state.device = 'solo'; go('role'); });
+    const body = $('#chp-body');
+    let lastKey = '', lastQn = null, picked = null;
+
+    const standby = (title, note) => `
+      <div class="panel panel-pad text-center grid gap-3 py-12">
+        <div class="eyebrow">${esc(title)}</div>
+        <div class="logo text-3xl">${esc(note)}</div>
+      </div>`;
+
+    const paint = snap => {
+      if (!snap){ body.innerHTML = standby('מסך הצ׳ייסר', 'מחכים למנחה…'); return; }
+
+      if (snap.screen === 'chase'){
+        if (snap.qn !== lastQn){ lastQn = snap.qn; picked = null; }
+        const done = picked !== null;
+        body.innerHTML = `
+          <div class="panel panel-pad grid gap-3">
+            <div class="spread">
+              <span class="chip">${esc(snap.cat || '')}</span>
+              <span class="chip chip-gold">שאלה ${snap.qn || 1}</span>
+            </div>
+            <div class="qtext">${esc(snap.q || '')}</div>
+          </div>
+          <div class="grid gap-2" id="chp-opts">
+            ${(snap.opts || []).map((o, i) => `
+              <button class="opt ${done && picked === i ? 'pick-c' : ''}" data-cp="${i}" ${done ? 'disabled' : ''}>
+                <span class="badge">${LETTERS[i]}</span><span>${esc(o)}</span>
+              </button>`).join('')}
+          </div>
+          <p class="muted text-sm text-center">${done ? '🔒 נעלתם — מחכים לגילוי' : 'בחרו תשובה. אף אחד לא רואה אותה עד הגילוי.'}</p>`;
+        bind('[data-cp]', 'click', e => {
+          if (picked !== null) return;
+          picked = +e.currentTarget.dataset.cp;
+          Net.sendPick(snap.qn, picked);
+          Sound.lock();
+          paint(snap);
+        }, body);
+        return;
+      }
+
+      if (snap.screen === 'finalChaser'){
+        body.innerHTML = `
+          <div class="panel panel-pad grid gap-3">
+            <div class="spread">
+              <span class="chip">${esc(snap.cat || '')}</span>
+              <span class="chip chip-chaser">${esc(snap.status || 'תורכם')}</span>
+            </div>
+            <div class="qtext">${esc(snap.q || '')}</div>
+          </div>
+          <p class="muted text-sm text-center">ענו בקול — המנחה מסמן אם צדקתם.</p>`;
+        return;
+      }
+
+      const where = { cash:'סבב הצבירה', offer:'ההצעות', ready:'מתכוננים',
+                      finalTeam:'המשפחה עונה', finalIntro:'המרדף הסופי',
+                      results:'סוף המשחק' }[snap.screen] || 'הצ׳ייסר';
+      body.innerHTML = standby(where, snap.screen === 'finalTeam' ? 'תכף תורכם' : 'לא תורכם עכשיו');
+    };
+
+    /* מציירים את מצב ההמתנה תחילה, ורק אז נרשמים — אחרת מסירה
+       סינכרונית ראשונה הייתה נמחקת מיד אחריה */
+    paint(null);
+    addCleanup(Net.watch(snap => {
+      /* מצייר מחדש רק כששדה משמעותי משתנה — אחרת הנעילה נמחקת */
+      const key = snap ? JSON.stringify([snap.screen, snap.qn, snap.q, snap.opts, snap.status]) : '';
+      if (key === lastKey) return;
+      lastKey = key;
+      paint(snap);
+    }));
   }
 };
 

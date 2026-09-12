@@ -261,6 +261,79 @@ async function runSharedScreen(){
   await browser.close();
 }
 
+/** מסך הצ׳ייסר: רואה שאלה ואפשרויות, לעולם לא את התשובה */
+async function runChaserRole(){
+  console.log('\n▶ מסך הצ׳ייסר');
+  const browser = await chromium.launch();
+  const page = await (await browser.newContext({ viewport:{ width:390, height:844 }, locale:'he-IL' })).newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(URL_, { waitUntil:'domcontentloaded' });
+
+  // מנחה אנושי + מצב "המכשיר ביד המנחה" — כאן התשובה גלויה למנחה כל הזמן,
+  // וזה בדיוק המצב שבו דליפה לשידור הייתה מתרחשת.
+  await page.click('#m-new');
+  await page.waitForSelector('#s-start');
+  await page.click('[data-count="1"]');
+  await page.click('[data-host="human"]');
+  await page.click('[data-ansmode="host"]');
+  await page.click('#s-start');
+  await waitScreen(page, 'ready');
+  await page.click('#go');
+  await waitScreen(page, 'cash');
+  await page.waitForTimeout(150);
+
+  const leak = await page.evaluate(() => {
+    const c = window.__chase;
+    return {
+      hostSees: !document.getElementById('judge-answer').hidden,
+      broadcast: c.buildSnap().answer || null,
+      answer: c.state.cash.q.a
+    };
+  });
+  (leak.hostSees && !leak.broadcast)
+    ? ok('התשובה גלויה למנחה אך לא משודרת — גם במצב "המכשיר ביד המנחה"')
+    : fail('דליפה: ' + JSON.stringify(leak));
+
+  // מגיעים למרדף ומציירים את מסך הצ׳ייסר מהשידור
+  for (let i = 0; i < 3; i++){
+    if (await page.isEnabled('#b-ok').catch(() => false)) await page.click('#b-ok');
+    await page.waitForTimeout(120);
+  }
+  await waitScreen(page, 'offer', 40000);
+  await page.click('[data-offer="mid"]');
+  await waitScreen(page, 'chase');
+  await page.waitForTimeout(500);
+
+  const chaser = await page.evaluate(() => {
+    const c = window.__chase;
+    const snap = c.buildSnap();
+    // מציירים את מסך הצ׳ייסר בפועל, מאותה תמונת מצב ששודרה
+    c.state.device = 'chaser';
+    c.Net.watch = cb => { cb(snap); return () => {}; };
+    c.go('chaserPhone');
+    return {
+      html: document.getElementById('chp-body').innerHTML,
+      answer: c.state.chase.q.a,
+      opts: c.state.chase.q.shuffled.length,
+      broadcastAnswer: snap.answer || null
+    };
+  });
+  const buttons = (chaser.html.match(/data-cp="/g) || []).length;
+  buttons === 3 ? ok('מסך הצ׳ייסר מציג שלוש אפשרויות לנעילה')
+                : fail(`מסך הצ׳ייסר הציג ${buttons} כפתורים`);
+  (!chaser.broadcastAnswer)
+    ? ok('התשובה לא נשלחת לצ׳ייסר במהלך המרדף')
+    : fail('התשובה שודרה לצ׳ייסר: ' + chaser.broadcastAnswer);
+  !/judge-answer|התשובה/.test(chaser.html)
+    ? ok('מסך הצ׳ייסר אינו מכיל את כרטיס התשובה')
+    : fail('כרטיס התשובה הופיע במסך הצ׳ייסר');
+
+  errors.length ? fail('שגיאות: ' + errors.slice(0,3).join(' | ')) : ok('אין שגיאות');
+  await page.screenshot({ path: path.join(SHOTS, 'chaser-phone.png') });
+  await browser.close();
+}
+
 /** מסך ההקרנה: מצייר את מצב המשחק, ולא חושף את התשובה לפני הזמן */
 async function runProjector(){
   console.log('\n▶ מסך ההקרנה');
@@ -350,7 +423,7 @@ async function runProjector(){
   await browser.close();
 }
 
-/* ONLY=proj|shared|full מריץ חלק אחד בלבד; בלעדיו רץ הכול */
+/* ONLY=proj|shared|chaser|full מריץ חלק אחד בלבד; בלעדיו רץ הכול */
 const ONLY = process.env.ONLY || '';
 console.log('בדיקת עשן — הצ׳ייסר\nכתובת: ' + URL_);
 if (!ONLY || ONLY === 'full'){
@@ -359,6 +432,7 @@ if (!ONLY || ONLY === 'full'){
 }
 if (!ONLY || ONLY === 'shared') await runSharedScreen();
 if (!ONLY || ONLY === 'proj')   await runProjector();
+if (!ONLY || ONLY === 'chaser') await runChaserRole();
 
 console.log('\nצילומי מסך: ' + SHOTS);
 if (failures){
