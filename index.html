@@ -207,13 +207,28 @@ label.pick.on{border-color:var(--gold); background:rgba(245,197,24,.14)}
 .proj-opts .opt{font-size:clamp(.95rem,2.6vmin,2rem); min-height:0; padding:clamp(.4rem,1.4vmin,1rem) clamp(.6rem,1.6vmin,1.2rem)}
 .proj-opts .badge{width:1.8em; height:1.8em}
 .proj-exit{
-  position:fixed; inset-block-start:8px; inset-inline-start:8px; z-index:5;
+  position:fixed; inset-block-end:8px; inset-inline-end:8px; z-index:5;
   font:inherit; font-size:.7rem; font-weight:700; color:var(--faint);
   background:transparent; border:1px solid var(--line); border-radius:8px;
   padding:.25rem .6rem; cursor:pointer; opacity:.35; transition:opacity .2s;
 }
 .proj-exit:hover,.proj-exit:focus-visible{opacity:1; color:var(--ink)}
 
+
+
+/* ---------- הלובי ---------- */
+.lrow{
+  display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:12px;
+  padding:.7rem .9rem; border-radius:14px; border:1px solid var(--line);
+  background:rgba(255,255,255,.03);
+}
+.lrow.on{border-color:rgba(245,197,24,.4); background:rgba(245,197,24,.07)}
+.licon{font-size:1.5rem; line-height:1}
+.proj-lobby{width:min(680px,92%); text-align:right}
+.proj-lobby .lrow{padding:clamp(.6rem,1.6vmin,1.2rem) clamp(.8rem,2vmin,1.4rem)}
+.proj-lobby .licon{font-size:clamp(1.5rem,4vmin,3rem)}
+.proj-lobby b{font-size:clamp(1rem,2.6vmin,2rem)}
+.proj-lobby .muted,.proj-lobby .chip{font-size:clamp(.7rem,1.6vmin,1.1rem)}
 
 /* ---------- רצף הפתיחה ---------- */
 .flow{display:grid; gap:16px; max-width:900px; margin-inline:auto; padding-block:18px 32px; align-content:start}
@@ -2611,9 +2626,12 @@ Screens.start = {
       Sound.init();
       if (step.id === 'screen'){
         if (!state.device) return warn('בחרו איזה מסך זה.');
-        if (state.device === 'screen'){ Net.standby(); return go('projector'); }
-        if (state.device === 'chaser') return go('chaserPhone');
-        if (state.device === 'host') startBroadcast();
+        if (state.device !== 'solo'){
+          /* כל המכשירים המחוברים נפגשים בלובי לפני שמתחילים */
+          Net.announce(state.device, deviceName());
+          if (state.device === 'host') startBroadcast();
+          return go('lobby');
+        }
         state.step = 1; return go('start');
       }
       if (step.id === 'players'){
@@ -2672,6 +2690,13 @@ const Net = {
     } catch(e){ this.room = null; }
     this.ready = !!this.room;
     return this.ready;
+  },
+
+  /* הכרזה על התפקיד — כך כל מכשיר מופיע בלובי של כולם.
+     presence ממוזג לפי שדה, ולכן role ו-name שורדים גם כשמשדרים snap או pick. */
+  announce(role, name){
+    if (!this.room || !role) return;
+    try { this.room.presence({ role, name: name || null }); } catch(e){}
   },
 
   /* המנחה משדר את מצב התצוגה */
@@ -2787,6 +2812,151 @@ function startBroadcast(){
    בחירת תפקיד המכשיר
    ============================================================ */
 /* ============================================================
+   הלובי — מי מחובר ובאיזה תפקיד
+   כל מכשיר מכריז על עצמו ב-presence, וכולם רואים את אותה רשימה.
+   מי שמצטרף מאוחר נכנס לתמונה מיד, ומי שמתנתק נעלם מעצמו.
+   הלובי הוא גם מסך ההמתנה: ברגע שהמנחה מתחיל משחק, כל המכשירים
+   עוברים יחד למסך שלהם בלי שאיש צריך ללחוץ.
+   ============================================================ */
+const ROLE_META = {
+  host:   { icon:'📱', name:'מסך מנחה',    note:'מריץ את המשחק',        one:true },
+  screen: { icon:'📺', name:'מסך הקרנה',   note:'מה שכולם רואים',       one:true },
+  chaser: { icon:'😈', name:'מסך הצ׳ייסר', note:'מי שמשחק את הנבל',     one:false }
+};
+/* מסכים שלפני תחילת המשחק — כל עוד המנחה שם, כולם נשארים בלובי */
+const PREGAME = ['start', 'rules', 'custom', 'lobby'];
+
+function deviceName(){
+  return (Store.get(KEY_SETTINGS, {}).deviceName || '').slice(0, 14);
+}
+
+/** כל המכשירים שהכריזו על תפקיד */
+function lobbyPeers(){
+  if (!Net.room) return [];
+  try {
+    return Net.room.peers()
+      .filter(p => p.presence && ROLE_META[p.presence.role])
+      .map(p => ({
+        role: p.presence.role,
+        name: (p.presence.name || '').trim(),
+        me:   p.isMe && p.sameTab,
+        mine: p.isMe
+      }));
+  } catch(e){ return []; }
+}
+
+/** הלובי עצמו — אותו סימון בכל המכשירים */
+function lobbyHtml({ compact = false } = {}){
+  const peers = lobbyPeers();
+  const byRole = r => peers.filter(p => p.role === r);
+  const dupes = Object.keys(ROLE_META).filter(r => ROLE_META[r].one && byRole(r).length > 1);
+
+  const row = r => {
+    const meta = ROLE_META[r];
+    const here = byRole(r);
+    const on = here.length > 0;
+    return `
+      <div class="lrow ${on ? 'on' : ''}">
+        <span class="licon">${meta.icon}</span>
+        <div class="min-w-0">
+          <b>${esc(meta.name)}</b>
+          <div class="muted text-xs">${on
+            ? here.map(p => esc(p.name || meta.name) + (p.me ? ' · אתם' : '')).join(' · ')
+            : esc(meta.note)}</div>
+        </div>
+        <span class="chip ${on ? 'chip-gold' : ''}">${on ? (here.length > 1 ? here.length + ' מכשירים' : 'מחובר') : 'לא מחובר'}</span>
+      </div>`;
+  };
+
+  return `
+    <div class="panel panel-pad grid gap-3">
+      <div class="spread">
+        <b class="text-lg">מי מחובר</b>
+        <span class="chip">${peers.length} ${peers.length === 1 ? 'מכשיר' : 'מכשירים'}</span>
+      </div>
+      <div class="grid gap-2">${Object.keys(ROLE_META).map(row).join('')}</div>
+      ${dupes.length ? `<p class="text-sm font-bold" style="color:#fca5a5">
+        ⚠ שני מכשירים בחרו ${dupes.map(r => esc(ROLE_META[r].name)).join(' ו')}.
+        אחד מהם צריך להחליף תפקיד, אחרת המשחק יתבלבל.</p>` : ''}
+      ${compact ? '' : `
+      <label class="grid gap-1">
+        <span class="muted text-sm">שם המכשיר (לא חובה)</span>
+        <input class="field" id="lb-name" maxlength="14" placeholder="למשל: הטלפון של דני" value="${esc(deviceName())}">
+      </label>`}
+    </div>`;
+}
+
+/** מפעיל עדכון חי של הלובי בתוך אלמנט נתון */
+function mountLobbyList(el, opts){
+  const paint = () => { if (document.body.contains(el)) el.innerHTML = lobbyHtml(opts); };
+  paint();
+  addCleanup(Net.watchPeers(paint));
+  return paint;
+}
+
+/** קלט שם המכשיר — משודר מיד לכל מי שבחדר */
+function mountNameField(){
+  const f = $('#lb-name');
+  if (!f) return;
+  f.addEventListener('input', () => {
+    const v = f.value.trim().slice(0, 14);
+    const s = Store.get(KEY_SETTINGS, {}); s.deviceName = v; Store.set(KEY_SETTINGS, s);
+    Net.announce(state.device, v);
+  });
+}
+
+Screens.lobby = {
+  html(){
+    const isHost = state.device === 'host';
+    return `
+    <div class="flow">
+      <header class="spread">
+        <div>
+          <div class="eyebrow">${esc(ROLE_META[state.device] ? ROLE_META[state.device].name : '')}</div>
+          <h1 class="logo text-3xl sm:text-5xl">הלובי</h1>
+        </div>
+        <button class="btn btn-icon" id="lb-exit">החלפת תפקיד</button>
+      </header>
+
+      <p class="muted text-sm">
+        כל מכשיר פותח את אותו קישור ובוחר תפקיד. ברגע שהמנחה מתחיל — כולם עוברים יחד.
+      </p>
+
+      <div id="lb-list"></div>
+
+      <div class="frow">
+        <span></span>
+        ${isHost
+          ? '<button class="btn btn-gold btn-xl glow px-10" id="lb-go">המשך להגדרות ←</button>'
+          : '<span class="chip chip-gold glow">מחכים שהמנחה יתחיל…</span>'}
+      </div>
+    </div>`;
+  },
+
+  mount(){
+    Net.announce(state.device, deviceName());
+    mountLobbyList($('#lb-list'), {});
+    mountNameField();
+
+    $('#lb-exit').addEventListener('click', () => {
+      state.device = null; state.step = 0; go('start');
+    });
+
+    const go_ = $('#lb-go');
+    if (go_) go_.addEventListener('click', () => { Sound.init(); state.step = 1; go('start'); });
+
+    /* מכשיר שאינו המנחה עובר למסך שלו ברגע שמתחיל משחק */
+    if (state.device !== 'host'){
+      addCleanup(Net.watch(snap => {
+        if (snap && !PREGAME.includes(snap.screen)){
+          go(state.device === 'screen' ? 'projector' : 'chaserPhone');
+        }
+      }));
+    }
+  }
+};
+
+/* ============================================================
    מסך ההקרנה — קורא בלבד
    ============================================================ */
 Screens.projector = {
@@ -2804,11 +2974,23 @@ Screens.projector = {
     back.addEventListener('click', () => { state.device = null; state.step = 0; go('start'); });
     APP().appendChild(back);
     let last = '';
+    /* לפני שמתחיל משחק המקרן מציג את הלובי — כך רואים על המסך הגדול מי הצטרף */
+    let inLobby = null;
     const un = Net.watch(snap => {
+      const pre = !snap || PREGAME.includes(snap.screen);
+      if (pre){
+        if (inLobby !== true){
+          inLobby = true;
+          root.innerHTML = `<div class="proj-body proj-center"><div class="proj-lobby" id="proj-lb"></div></div>`;
+          mountLobbyList($('#proj-lb'), { compact: true });
+        }
+        return;
+      }
+      inLobby = false;
       const key = JSON.stringify(snap);
       if (key === last) return;
       last = key;
-      root.innerHTML = snap ? projectorHtml(snap) : Screens.projector.html().replace(/^<div id="proj" class="proj">|<\/div>$/g, '');
+      root.innerHTML = projectorHtml(snap);
     });
     addCleanup(un);
     /* השעון רץ מקומית בין עדכונים כדי שהספירה תהיה חלקה */
@@ -2852,7 +3034,11 @@ Screens.chaserPhone = {
       </div>`;
 
     const paint = snap => {
-      if (!snap){ body.innerHTML = standby('מסך הצ׳ייסר', 'מחכים למנחה…'); return; }
+      if (!snap || PREGAME.includes(snap.screen)){
+        body.innerHTML = '<div id="chp-lb"></div>';
+        mountLobbyList($('#chp-lb'), { compact: true });
+        return;
+      }
 
       if (snap.screen === 'chase'){
         if (snap.qn !== lastQn){ lastQn = snap.qn; picked = null; }
@@ -2906,7 +3092,7 @@ Screens.chaserPhone = {
     paint(null);
     addCleanup(Net.watch(snap => {
       /* מצייר מחדש רק כששדה משמעותי משתנה — אחרת הנעילה נמחקת */
-      const key = snap ? JSON.stringify([snap.screen, snap.qn, snap.q, snap.opts, snap.status]) : '';
+      const key = snap ? JSON.stringify([snap.screen, snap.qn, snap.q, snap.opts, snap.status]) : 'lobby';
       if (key === lastKey) return;
       lastKey = key;
       paint(snap);

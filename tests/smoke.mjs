@@ -359,8 +359,9 @@ async function runFlow(){
     await new Promise(r => setTimeout(r, 200));
     return c.state.screen;
   });
-  reached === 'projector' ? ok('"מסך הקרנה" מדלג ישר להקרנה, בלי שלב שחקנים')
-                          : fail('"מסך הקרנה" הגיע ל-' + reached);
+  // מאז הלובי היעד הוא הלובי, לא ההקרנה — הנקודה נשמרת: לא נשאלו על שחקנים
+  reached === 'lobby' ? ok('"מסך הקרנה" עובר ללובי, בלי שלב שחקנים')
+                      : fail('"מסך הקרנה" הגיע ל-' + reached);
 
   errors.length ? fail('שגיאות: ' + errors.slice(0,3).join(' | ')) : ok('אין שגיאות');
   await browser.close();
