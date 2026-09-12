@@ -187,6 +187,13 @@ label.pick.on{border-color:var(--gold); background:rgba(245,197,24,.14)}
   border-top:1px dashed rgba(255,255,255,.18); padding-top:.5em;
 }
 .proj-q-wrap{display:grid; gap:clamp(8px,1.8vmin,22px); align-content:center; min-width:0}
+.joincode{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:900;
+  font-size:clamp(2.6rem,14vw,4.5rem); letter-spacing:.22em; color:var(--gold);
+  text-shadow:0 0 24px rgba(212,175,55,.35); padding-inline-start:.22em}
+.joininput{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-weight:900;
+  font-size:2.2rem; letter-spacing:.32em; text-align:center; text-transform:uppercase;
+  padding-inline-start:.32em}
+.lnk{color:var(--gold); text-decoration:underline}
 .proj-clock{font-size:clamp(1.8rem,6vmin,4.4rem); font-weight:900; font-variant-numeric:tabular-nums}
 .proj-side{display:grid; gap:clamp(6px,1.2vmin,14px); justify-items:center; align-content:center; text-align:center}
 .proj-ring{width:clamp(90px,20vmin,220px)}
@@ -2551,14 +2558,17 @@ Screens.start = {
       /* משחק בכמה מכשירים אפשרי רק כשהדפדפן הזה יכול להתחבר לחדר —
          בקישור המתארח, למי שמחובר לאותו חשבון/ארגון. כשזה לא אפשרי
          לא מציגים כפתורים מושבתים אלא פשוט מסבירים; מסך אחד הוא משחק מלא. */
-      const show = ok => {
+      const show = () => {
         const box = $('#f-multi'), el = $('#f-net');
         if (!box || !el) return;
+        const code = Net.canCode(), ok = Net.ready || code;
         box.classList.toggle('hidden', !ok);
-        el.textContent = ok
-          ? 'אפשר לצרף עכשיו עוד מכשירים לאותו קישור.'
-          : 'במכשיר הזה המשחק רץ על מסך אחד — וזה המשחק המלא. ' +
-            'חלוקה בין מסך הקרנה לטלפון דורשת שכל המכשירים יהיו מחוברים לאותו חשבון.';
+        el.innerHTML = code
+          ? 'כל מכשיר בוחר תפקיד ומקיש את אותו קוד הצטרפות — גם טלפונים של אחרים.'
+          : ok
+          ? 'אפשר לצרף עכשיו עוד מכשירים לאותו קישור, בתנאי שהם מחוברים לאותו חשבון.'
+          : 'במכשיר הזה המשחק רץ על מסך אחד — וזה המשחק המלא. לחלוקה בין מסך הקרנה ' +
+            'לטלפונים (גם של אחרים) פתחו את <a class="lnk" href="' + WEB_URL + '">הגרסה באינטרנט</a>.';
         /* כשיש רק אפשרות אחת אין טעם לבקש לבחור בה — בוחרים מראש */
         if (!ok && !state.device){
           state.device = 'solo';
@@ -2568,8 +2578,8 @@ Screens.start = {
           if (nx) nx.textContent = 'הבא ←';
         }
       };
-      if (Net.ready) show(true);
-      else Net.init().then(show);
+      show();
+      if (!Net.ready) Net.init().then(show);
 
       bind('[data-dev]', 'click', e => {
         state.device = e.currentTarget.dataset.dev;
@@ -2627,6 +2637,8 @@ Screens.start = {
       if (step.id === 'screen'){
         if (!state.device) return warn('בחרו איזה מסך זה.');
         if (state.device !== 'solo'){
+          /* בכתובת רגילה נפגשים קודם סביב קוד; בחדר של Claude אין בו צורך */
+          if (Net.kind !== 'room' && Net.canCode()) return go('join');
           /* כל המכשירים המחוברים נפגשים בלובי לפני שמתחילים */
           Net.announce(state.device, deviceName());
           if (state.device === 'host') startBroadcast();
@@ -2682,15 +2694,52 @@ Screens.start = {
    התשובה הנכונה נכנסת לשידור רק ברגע החשיפה.
    ============================================================ */
 const Net = {
-  room: null, ready: false, err: null,
+  room: null, ready: false, kind: null, code: null, err: null, status: 'off', _ends: null,
+  _st: new Set(),
 
   async init(){
-    try {
-      this.room = (window.claude && claude.use) ? await claude.use('room') : null;
-    } catch(e){ this.room = null; }
-    this.ready = !!this.room;
+    if (window.claude && claude.use){
+      try { this.room = await claude.use('room'); } catch(e){ this.room = null; }
+      if (this.room){ this.kind = 'room'; this.ready = true; this.hook(); }
+    }
+    if (!this.ready) this.setStatus(this.canCode() ? 'code' : 'off');
     return this.ready;
   },
+
+  /* ערוץ עם קוד אפשרי בכל כתובת אינטרנט רגילה. בתוך הארטיפקט הדף חסום
+     מפנייה לשרת חיצוני, ולכן שם נשאר רק החדר של Claude — ואיתו רק מכשירים
+     שמחוברים לאותו חשבון. */
+  canCode(){
+    return !(window.claude && claude.use) && /^https?:$/.test(location.protocol);
+  },
+
+  /** פתיחת ערוץ לפי קוד הצטרפות */
+  join(code){
+    if (this.kind === 'relay' && this.code === code) return true;
+    if (!this.canCode() || !code) return false;
+    try { this.room = RelayTransport(relayBase(), code); }
+    catch(e){ this.room = null; this.ready = false; return false; }
+    this.kind = 'relay'; this.code = code; this.ready = true;
+    this.hook();
+    return true;
+  },
+
+  /* מצב החיבור — כדי שהלובי לא יציג רשימה ריקה בלי הסבר */
+  hook(){
+    try {
+      this.room.onConnection(
+        ok => this.setStatus(ok ? 'online' : 'connecting'),
+        e  => { this.err = (e && e.code) || 'error'; this.setStatus('blocked'); }
+      );
+      this.setStatus(this.room.connected() ? 'online' : 'connecting');
+    } catch(e){ this.setStatus('connecting'); }
+  },
+  setStatus(s){
+    if (this.status === s) return;
+    this.status = s;
+    this._st.forEach(fn => { try { fn(s); } catch(e){} });
+  },
+  onStatus(cb){ this._st.add(cb); return () => this._st.delete(cb); },
 
   /* הכרזה על התפקיד — כך כל מכשיר מופיע בלובי של כולם.
      presence ממוזג לפי שדה, ולכן role ו-name שורדים גם כשמשדרים snap או pick. */
@@ -2699,9 +2748,21 @@ const Net = {
     try { this.room.presence({ role, name: name || null }); } catch(e){}
   },
 
-  /* המנחה משדר את מצב התצוגה */
+  /* המנחה משדר את מצב התצוגה.
+     בערוץ הקוד השעון נשלח כזמן סיום ולא כזמן שנותר, כך שתמונת מצב זהה
+     נשארת זהה גם בזמן שהשעון רץ — ואין מה לשדר עד שמשהו באמת משתנה. */
   publish(snap){
     if (!this.room) return;
+    if (this.kind === 'relay' && snap && snap.clock && snap.clock.run){
+      /* עיגול הזמן שנותר מזיז את רגע הסיום בכמה אלפיות בכל פעימה, וזה לבדו
+         היה נראה כשינוי ומייצר שידור מיותר. נשארים על אותו רגע סיום כל עוד
+         הוא לא זז באמת. */
+      const ends = Date.now() + snap.clock.ms;
+      if (this._ends == null || Math.abs(ends - this._ends) > 400) this._ends = ends;
+      snap = { ...snap, clock: { total: snap.clock.total, run: true, ends: this._ends } };
+    } else {
+      this._ends = null;
+    }
     try { this.room.presence({ role: 'host', snap }); } catch(e){}
   },
   standby(){
@@ -2709,13 +2770,14 @@ const Net = {
     try { this.room.presence({ role: 'screen', snap: null }); } catch(e){}
   },
 
-  /* כל מי שנמצא בחדר — לקריאת בחירת הצ׳ייסר */
+  /* כל מי שנמצא בחדר — לקריאת בחירת הצ׳ייסר ולרשימת הלובי */
   watchPeers(cb){
     if (!this.room) return () => {};
     const fire = () => cb(this.room.peers());
     const un = this.room.onPeers(fire, () => {});
+    const uns = this.onStatus(fire);
     fire();
-    return un;
+    return () => { un(); uns(); };
   },
 
   /* הצ׳ייסר משדר את הבחירה שלו; המנחה קורא אותה */
@@ -2733,13 +2795,159 @@ const Net = {
         const pr = p.presence;
         if (pr && pr.role === 'host' && pr.snap && (!best || p.updatedAt > best.updatedAt)) best = p;
       }
-      cb(best ? best.presence.snap : null);
+      cb(best ? unskew(best.presence.snap, best.skew || 0) : null);
     };
     const un = this.room.onPeers(pick, () => cb(null));
     pick();
     return un;
   }
 };
+
+/** זמן סיום ששודר לפי שעונו של השולח, בחזרה לזמן שנותר כאן */
+function unskew(snap, skew){
+  if (!snap || !snap.clock || snap.clock.ends == null) return snap;
+  return { ...snap, clock: {
+    ms: Math.max(0, snap.clock.ends - skew - Date.now()),
+    total: snap.clock.total, run: snap.clock.run
+  } };
+}
+
+/* ---------- קוד ההצטרפות ---------- */
+/* בלי 0/O/1/I — האותיות שמתבלבלות כשמקריאים קוד בקול */
+const CODE_ABC = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const RELAY_DEFAULT = 'https://ntfy.sh';
+/* הכתובת הפומבית של המשחק — שם אפשר לצרף טלפונים של אחרים */
+const WEB_URL = 'https://leviofir800-lgtm.github.io/the-chase-game/';
+
+function newCode(){
+  const a = new Uint8Array(4);
+  if (window.crypto && crypto.getRandomValues) crypto.getRandomValues(a);
+  else for (let i = 0; i < 4; i++) a[i] = Math.floor(Math.random() * 256);
+  return [...a].map(b => CODE_ABC[b % 32]).join('');
+}
+function cleanCode(s){
+  return (s || '').toUpperCase().split('').filter(c => CODE_ABC.includes(c)).join('').slice(0, 4);
+}
+function savedCode(){
+  return cleanCode(qs('code')) || cleanCode(Store.get(KEY_SETTINGS, {}).code);
+}
+function rememberCode(c){
+  const s = Store.get(KEY_SETTINGS, {}); s.code = c; Store.set(KEY_SETTINGS, s);
+}
+function qs(k){ try { return new URLSearchParams(location.search).get(k); } catch(e){ return null; } }
+function relayBase(){
+  const q = qs('relay');
+  return (q && /^https?:\/\//i.test(q)) ? q : RELAY_DEFAULT;
+}
+
+/* ============================================================
+   ערוץ הקוד — presence מעל ממסר פומבי (ntfy)
+   אין שם presence מובנה, ולכן הוא נבנה כאן: כל מכשיר משדר את מצבו
+   המלא, עונה מיד למי שמצטרף, ופועם כל 20 שניות כדי להישאר ברשימה.
+   משדרים רק כשמשהו באמת השתנה — ממסר חינמי לא סובל זרם קבוע.
+   ============================================================ */
+const HEARTBEAT = 20000, PEER_TTL = 60000, MIN_GAP = 700;
+
+function RelayTransport(base, code){
+  const url = String(base).replace(/\/+$/, '') + '/chase-' + code.toLowerCase();
+  const me  = 'd' + Math.random().toString(36).slice(2, 10);
+  const others  = new Map();            /* id → {presence, at, skew} */
+  const peersCb = new Set(), connCb = new Set();
+  let mine = {}, view = Object.freeze([]), es = null, open = false, dead = false;
+  let lastSent = '', lastAt = 0, pending = null, lastHi = 0;
+
+  const rebuild = () => {
+    const list = [{ peer: me, by: null, isMe: true, sameTab: true, kind: 'viewer',
+                    presence: Object.freeze({ ...mine }), updatedAt: lastAt || Date.now(), skew: 0 }];
+    others.forEach((o, id) => list.push({ peer: id, by: null, isMe: false, sameTab: false,
+                    kind: 'viewer', presence: o.presence, updatedAt: o.at, skew: o.skew }));
+    view = Object.freeze(list);
+    peersCb.forEach(fn => { try { fn({ peers: view, joined: [], left: [], updated: [] }); } catch(e){} });
+  };
+  const setOpen = ok => {
+    if (open === ok) return;
+    open = ok;
+    connCb.forEach(fn => { try { fn(ok); } catch(e){} });
+  };
+
+  const post = body => {
+    try { fetch(url, { method:'POST', body: JSON.stringify(body) }).catch(() => {}); } catch(e){}
+  };
+  const push = kind => {
+    lastSent = JSON.stringify(mine); lastAt = Date.now();
+    post({ t: kind, id: me, now: lastAt, p: mine });
+  };
+  const send = () => {
+    if (dead) return;
+    if (JSON.stringify(mine) === lastSent) return;     /* שום דבר לא השתנה */
+    const gap = Date.now() - lastAt;
+    if (gap < MIN_GAP){
+      if (!pending) pending = setTimeout(() => { pending = null; send(); }, MIN_GAP - gap);
+      return;
+    }
+    push('p');
+  };
+
+  const handle = msg => {
+    if (!msg || !msg.id || msg.id === me) return;
+    if (msg.t === 'bye'){ if (others.delete(msg.id)) rebuild(); return; }
+    others.set(msg.id, {
+      presence: Object.freeze(msg.p || {}),
+      at: Date.now(),
+      skew: (msg.now || Date.now()) - Date.now()
+    });
+    rebuild();
+    /* מצטרף חדש — עונים לו מיד, אבל בהודעת מצב רגילה: תשובה מסוג 'hi'
+       הייתה גורמת לצד השני לענות שוב, וכך הלאה בלי סוף. */
+    if (msg.t === 'hi' && Date.now() - lastHi > 400){ lastHi = Date.now(); push('p'); }
+  };
+
+  const listen = () => {
+    if (dead) return;
+    try { es = new EventSource(url + '/sse?since=' + Math.floor(Date.now() / 1000)); }
+    catch(e){ setOpen(false); return; }
+    es.onopen = () => { setOpen(true); push('hi'); };
+    es.onerror = () => setOpen(false);                 /* EventSource מתחבר מחדש לבד */
+    es.onmessage = ev => {
+      let m, msg;
+      try { m = JSON.parse(ev.data); } catch(e){ return; }
+      if (m.event && m.event !== 'message') return;
+      try { msg = JSON.parse(m.message); } catch(e){ return; }
+      handle(msg);
+    };
+  };
+
+  const beat  = setInterval(() => { if (!dead) push('p'); }, HEARTBEAT);
+  const sweep = setInterval(() => {
+    const cut = Date.now() - PEER_TTL;
+    let gone = false;
+    others.forEach((o, id) => { if (o.at < cut){ others.delete(id); gone = true; } });
+    if (gone) rebuild();
+  }, 5000);
+
+  const bye = () => { dead = true; try { post({ t:'bye', id: me }); } catch(e){} };
+  window.addEventListener('pagehide', bye);
+
+  listen();
+  rebuild();
+
+  return {
+    presence(patch){
+      const before = JSON.stringify(mine);
+      Object.keys(patch || {}).forEach(k => { if (patch[k] === null) delete mine[k]; else mine[k] = patch[k]; });
+      if (JSON.stringify(mine) !== before) rebuild();
+      send();
+      return Promise.resolve();
+    },
+    peers(){ return view; },
+    onPeers(fn){ peersCb.add(fn); queueMicrotask(() => { if (peersCb.has(fn)) fn({ peers: view, joined: view, left: [], updated: [] }); }); return () => peersCb.delete(fn); },
+    connected(){ return open; },
+    onConnection(fn){ connCb.add(fn); queueMicrotask(() => { if (connCb.has(fn)) fn(open); }); return () => connCb.delete(fn); },
+    emit(){ return Promise.resolve(); },
+    on(){ return () => {}; },
+    close(){ bye(); clearInterval(beat); clearInterval(sweep); if (es) es.close(); }
+  };
+}
 
 /* ---------- בניית תמונת המצב לשידור ---------- */
 function buildSnap(){
@@ -2846,10 +3054,20 @@ function lobbyPeers(){
 }
 
 /** הלובי עצמו — אותו סימון בכל המכשירים */
-function lobbyHtml({ compact = false } = {}){
+/** שורת מצב החיבור — כדי שרשימה ריקה לעולם לא תישאר בלי הסבר */
+function netChip(){
+  if (!Net.ready) return { t: 'ללא חיבור', on: false };
+  if (Net.status === 'online')  return { t: 'מחובר',    on: true };
+  if (Net.status === 'blocked') return { t: 'אין חיבור', on: false };
+  return { t: 'מתחבר…', on: false };
+}
+
+/** הלובי עצמו — אותו סימון בכל המכשירים */
+function lobbyHtml(){
   const peers = lobbyPeers();
   const byRole = r => peers.filter(p => p.role === r);
   const dupes = Object.keys(ROLE_META).filter(r => ROLE_META[r].one && byRole(r).length > 1);
+  const net = netChip();
 
   const row = r => {
     const meta = ROLE_META[r];
@@ -2872,29 +3090,36 @@ function lobbyHtml({ compact = false } = {}){
     <div class="panel panel-pad grid gap-3">
       <div class="spread">
         <b class="text-lg">מי מחובר</b>
-        <span class="chip">${peers.length} ${peers.length === 1 ? 'מכשיר' : 'מכשירים'}</span>
+        <span class="row gap-2">
+          ${Net.code ? `<span class="chip chip-gold">קוד ${esc(Net.code)}</span>` : ''}
+          <span class="chip ${net.on ? 'chip-gold' : ''}">${esc(net.t)}</span>
+        </span>
       </div>
       <div class="grid gap-2">${Object.keys(ROLE_META).map(row).join('')}</div>
       ${dupes.length ? `<p class="text-sm font-bold" style="color:#fca5a5">
         ⚠ שני מכשירים בחרו ${dupes.map(r => esc(ROLE_META[r].name)).join(' ו')}.
         אחד מהם צריך להחליף תפקיד, אחרת המשחק יתבלבל.</p>` : ''}
-      ${compact ? '' : `
-      <label class="grid gap-1">
-        <span class="muted text-sm">שם המכשיר (לא חובה)</span>
-        <input class="field" id="lb-name" maxlength="14" placeholder="למשל: הטלפון של דני" value="${esc(deviceName())}">
-      </label>`}
+      ${Net.status === 'blocked' ? `<p class="muted text-sm">
+        הדפדפן הזה לא הצליח להתחבר. בדקו שכל המכשירים פתחו את אותה כתובת ואת אותו קוד.</p>` : ''}
     </div>`;
 }
 
-/** מפעיל עדכון חי של הלובי בתוך אלמנט נתון */
-function mountLobbyList(el, opts){
-  const paint = () => { if (document.body.contains(el)) el.innerHTML = lobbyHtml(opts); };
+/** מפעיל עדכון חי של הלובי בתוך אלמנט נתון.
+    מצייר מחדש רק כשמשהו באמת השתנה — המנחה משדר תמונת מצב כמה פעמים
+    בשנייה, ואסור שזה ידרוס את מה שמקלידים. */
+function mountLobbyList(el){
+  let last = '';
+  const paint = () => {
+    if (!document.body.contains(el)) return;
+    const html = lobbyHtml();
+    if (html === last) return;
+    last = html; el.innerHTML = html;
+  };
   paint();
   addCleanup(Net.watchPeers(paint));
   return paint;
 }
 
-/** קלט שם המכשיר — משודר מיד לכל מי שבחדר */
 function mountNameField(){
   const f = $('#lb-name');
   if (!f) return;
@@ -2904,6 +3129,89 @@ function mountNameField(){
     Net.announce(state.device, v);
   });
 }
+
+/* ============================================================
+   הקוד — המפגש שלפני הלובי.
+   בכתובת אינטרנט רגילה אין דרך לדעת לבד מי שייך לאיזה משחק, ולכן
+   המנחה מציג קוד וכל השאר מקישים אותו. זה גם מה שמאפשר לטלפונים של
+   אחרים להצטרף בכלל — בלי חשבון ובלי הרשאה.
+   ============================================================ */
+Screens.join = {
+  html(){
+    const isHost = state.device === 'host';
+    const meta   = ROLE_META[state.device] || {};
+    const code   = savedCode() || (isHost ? newCode() : '');
+    state.joinCode = code;
+    return `
+    <div class="flow">
+      <header class="spread">
+        <div>
+          <div class="eyebrow">${esc(meta.name || '')}</div>
+          <h1 class="logo text-3xl sm:text-5xl">${isHost ? 'קוד המשחק' : 'קוד הצטרפות'}</h1>
+        </div>
+        <button class="btn btn-icon" id="j-back">חזרה</button>
+      </header>
+
+      ${isHost ? `
+        <div class="panel panel-pad grid gap-3 text-center">
+          <p class="muted text-sm">הקריאו את הקוד הזה — כל מכשיר אחר מקיש אותו כדי להצטרף.</p>
+          <div class="joincode" id="j-code">${esc(code)}</div>
+          <button class="btn" id="j-new">🎲 קוד אחר</button>
+        </div>` : `
+        <div class="panel panel-pad grid gap-3">
+          <b class="text-lg">הקישו את הקוד שמופיע אצל המנחה</b>
+          <input class="field joininput" id="j-in" maxlength="4" autocomplete="off"
+                 autocapitalize="characters" spellcheck="false" placeholder="••••" value="${esc(code)}">
+        </div>`}
+
+      <p class="muted text-xs">
+        הקוד פותח ערוץ אצל שירות ממסר חינמי וציבורי. מי שינחש אותו יוכל לצפות במשחק,
+        ולכן הקוד מתחלף בכל משחק. התשובות הנכונות לא נשלחות לפני החשיפה.
+      </p>
+
+      <div class="frow">
+        <span></span>
+        <button class="btn btn-gold btn-xl glow px-10" id="j-go">${isHost ? 'פתחו לובי ←' : 'הצטרפו ←'}</button>
+      </div>
+      <p class="muted text-sm text-center hidden" id="j-warn"></p>
+    </div>`;
+  },
+
+  mount(){
+    const isHost = state.device === 'host';
+    const warn = m => { const w = $('#j-warn'); w.textContent = m; w.classList.remove('hidden'); };
+
+    $('#j-back').addEventListener('click', () => { state.device = null; state.step = 0; go('start'); });
+
+    const fresh = $('#j-new');
+    if (fresh) fresh.addEventListener('click', () => {
+      state.joinCode = newCode();
+      $('#j-code').textContent = state.joinCode;
+      Sound.init(); Sound.beep();
+    });
+
+    const field = $('#j-in');
+    if (field){
+      field.addEventListener('input', () => {
+        const c = cleanCode(field.value);
+        if (field.value !== c) field.value = c;
+        state.joinCode = c;
+      });
+      field.focus();
+    }
+
+    $('#j-go').addEventListener('click', () => {
+      Sound.init();
+      const code = cleanCode(isHost ? state.joinCode : (field ? field.value : ''));
+      if (code.length !== 4) return warn('קוד המשחק הוא ארבע אותיות וספרות.');
+      if (!Net.join(code)) return warn('לא הצלחנו לפתוח את הערוץ במכשיר הזה.');
+      rememberCode(code);
+      Net.announce(state.device, deviceName());
+      if (isHost) startBroadcast();
+      go('lobby');
+    });
+  }
+};
 
 Screens.lobby = {
   html(){
@@ -2919,10 +3227,17 @@ Screens.lobby = {
       </header>
 
       <p class="muted text-sm">
-        כל מכשיר פותח את אותו קישור ובוחר תפקיד. ברגע שהמנחה מתחיל — כולם עוברים יחד.
+        ${Net.code
+          ? 'כל מכשיר פותח את אותו קישור, מקיש את הקוד ובוחר תפקיד. ברגע שהמנחה מתחיל — כולם עוברים יחד.'
+          : 'כל מכשיר פותח את אותו קישור ובוחר תפקיד. ברגע שהמנחה מתחיל — כולם עוברים יחד.'}
       </p>
 
       <div id="lb-list"></div>
+
+      <label class="grid gap-1">
+        <span class="muted text-sm">שם המכשיר (לא חובה)</span>
+        <input class="field" id="lb-name" maxlength="14" placeholder="למשל: הטלפון של דני" value="${esc(deviceName())}">
+      </label>
 
       <div class="frow">
         <span></span>
@@ -2935,7 +3250,7 @@ Screens.lobby = {
 
   mount(){
     Net.announce(state.device, deviceName());
-    mountLobbyList($('#lb-list'), {});
+    mountLobbyList($('#lb-list'));
     mountNameField();
 
     $('#lb-exit').addEventListener('click', () => {
@@ -2982,7 +3297,7 @@ Screens.projector = {
         if (inLobby !== true){
           inLobby = true;
           root.innerHTML = `<div class="proj-body proj-center"><div class="proj-lobby" id="proj-lb"></div></div>`;
-          mountLobbyList($('#proj-lb'), { compact: true });
+          mountLobbyList($('#proj-lb'));
         }
         return;
       }
@@ -3036,7 +3351,7 @@ Screens.chaserPhone = {
     const paint = snap => {
       if (!snap || PREGAME.includes(snap.screen)){
         body.innerHTML = '<div id="chp-lb"></div>';
-        mountLobbyList($('#chp-lb'), { compact: true });
+        mountLobbyList($('#chp-lb'));
         return;
       }
 
