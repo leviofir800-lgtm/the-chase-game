@@ -23,7 +23,7 @@
   color-scheme:dark;
   --bg:#04060e; --panel-1:rgba(19,28,54,.92); --panel-2:rgba(10,16,32,.92);
   --gold:#f5c518; --gold-2:#ffe27a; --player:#38bdf8; --chaser:#ef4444;
-  --ink:#e9eefb; --muted:#93a4c8; --ok:#22c55e; --bad:#ef4444;
+  --ink:#e9eefb; --muted:#93a4c8; --faint:#6b7c9e; --ok:#22c55e; --bad:#ef4444;
   --line:rgba(255,255,255,.10);
 }
 *{box-sizing:border-box}
@@ -213,6 +213,25 @@ label.pick.on{border-color:var(--gold); background:rgba(245,197,24,.14)}
   padding:.25rem .6rem; cursor:pointer; opacity:.35; transition:opacity .2s;
 }
 .proj-exit:hover,.proj-exit:focus-visible{opacity:1; color:var(--ink)}
+
+
+/* ---------- רצף הפתיחה ---------- */
+.flow{display:grid; gap:16px; max-width:900px; margin-inline:auto; padding-block:18px 32px; align-content:start}
+.fsteps{display:flex; gap:6px; flex-wrap:wrap}
+.fstep{
+  flex:1 1 auto; text-align:center; font-size:.72rem; font-weight:800; letter-spacing:.04em;
+  padding:.4rem .5rem; border-radius:999px; color:var(--faint, #6b7c9e);
+  border:1px solid var(--line); background:rgba(255,255,255,.03); white-space:nowrap;
+}
+.fstep.done{color:var(--gold-2); border-color:rgba(245,197,24,.35); background:rgba(245,197,24,.08)}
+.fstep.on{color:#231a00; background:linear-gradient(180deg,#ffe694,#f5c518); border-color:#ffdf6b}
+.frow{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap}
+.frow > :only-child{margin-inline-start:auto}
+@media (max-width:480px){
+  .frow{flex-direction:column-reverse}
+  .frow > *{width:100%}
+  .fstep{font-size:.66rem; padding:.35rem .35rem}
+}
 
 /* ---------- כרטיס המנחה ---------- */
 .judgecard{
@@ -953,7 +972,8 @@ const state = {
   chaser: CHASERS.medium,
   hostMode: 'ai',            // 'ai' | 'human'
   answerMode: 'host',        // 'host' = התשובה גלויה למנחה | 'shared' = מוסתרת עד לחיצה
-  device: 'solo',            // 'solo' | 'host' (טלפון) | 'screen' (מקרן)
+  device: null,              // 'solo' | 'host' (טלפון) | 'screen' (מקרן) | 'chaser'
+  step: 0, draft: null,      // מיקום ברצף הפתיחה והבחירות שנאספו
   clock: null,               // השעון הפעיל, לשידור למסך ההקרנה
   outcome: null,
   cats: Object.keys(CATS).filter(k => k !== 'fam'),
@@ -1121,7 +1141,7 @@ function topBar(title, sub){
     </div>
     <div class="row">
       <button class="btn" id="btn-sound" aria-label="הפעלה וכיבוי של הקול">${Sound.muted ? '🔇' : '🔊'}</button>
-      <button class="btn" id="btn-quit">יציאה לתפריט</button>
+      <button class="btn" id="btn-quit">יציאה</button>
     </div>
   </header>`;
 }
@@ -1136,9 +1156,9 @@ function mountTopBar(){
   const q = $('#btn-quit');
   if (q){
     let armed = false, revert = null;
-    const reset = () => { armed = false; q.textContent = 'יציאה לתפריט'; q.classList.remove('btn-bad'); };
+    const reset = () => { armed = false; q.textContent = 'יציאה'; q.classList.remove('btn-bad'); };
     q.addEventListener('click', () => {
-      if (armed){ clearTimeout(revert); Sound.musicStop(); go('menu'); return; }
+      if (armed){ clearTimeout(revert); Sound.musicStop(); state.step = 0; go('start'); return; }
       armed = true;
       q.textContent = 'בטוח? לחצו שוב';
       q.classList.add('btn-bad');
@@ -1152,44 +1172,6 @@ function mountTopBar(){
 /* ============================================================
    מסך 1 — תפריט ראשי
    ============================================================ */
-Screens.menu = {
-  html(){
-    const custom = customQuestions().length;
-    return `
-    <div class="hero">
-      <div class="eyebrow mb-3">משחק טריוויה משפחתי</div>
-      <h1 class="logo text-6xl sm:text-8xl mb-2">הצ׳ייסר</h1>
-      <p class="muted text-lg mb-8 max-w-xl">
-        שלושה סבבים. צ׳ייסר אחד. 1–4 שחקנים.<br class="only-sm">
-        תצברו כסף, תברחו הביתה — ותנצחו אותו במרדף הסופי.
-      </p>
-
-      <div class="grid gap-3 w-full max-w-sm">
-        <button class="btn btn-gold btn-xl glow" id="m-new">▶ משחק חדש</button>
-        <button class="btn btn-lg" id="m-custom">✏️ טריוויה משפחתית ${custom ? `<span class="chip chip-gold">${custom}</span>` : ''}</button>
-        <button class="btn btn-lg" id="m-rules">📖 איך משחקים</button>
-        <button class="btn btn-lg" id="m-sound">${Sound.muted ? '🔇 הקול כבוי' : '🔊 הקול פועל'}</button>
-      </div>
-
-      <p class="muted text-xs mt-10 max-w-md">
-        המשחק רץ במלואו בדפדפן — בלי שרת ובלי התקנה. השאלות המשפחתיות נשמרות במכשיר הזה בלבד.
-      </p>
-    </div>`;
-  },
-  mount(){
-    $('#m-new').addEventListener('click', () => { Sound.init(); go('setup'); });
-    $('#m-custom').addEventListener('click', () => { Sound.init(); go('custom'); });
-    $('#m-rules').addEventListener('click', () => go('rules'));
-    const b = $('#m-sound');
-    b.addEventListener('click', () => {
-      Sound.init(); Sound.setMuted(!Sound.muted);
-      b.textContent = Sound.muted ? '🔇 הקול כבוי' : '🔊 הקול פועל';
-      if (!Sound.muted) Sound.correct();
-    });
-    onKeys({ Enter: () => { Sound.init(); go('setup'); } });
-  }
-};
-
 /* ============================================================
    מסך 2 — חוקי המשחק
    ============================================================ */
@@ -1238,7 +1220,7 @@ Screens.rules = {
   },
   mount(){
     mountTopBar();
-    $('#r-back').addEventListener('click', () => go('menu'));
+    $('#r-back').addEventListener('click', () => go('start'));
     $('#btn-quit').classList.add('hidden');
   }
 };
@@ -1397,165 +1379,14 @@ Screens.custom = {
       addTimeout(() => { if ($('#c-json').value.trim()) loadJson($('#c-json').value); }, 60);
     });
 
-    $('#c-play').addEventListener('click', () => go('setup'));
-    $('#c-back').addEventListener('click', () => go('menu'));
+    $('#c-play').addEventListener('click', () => go('start'));
+    $('#c-back').addEventListener('click', () => go('start'));
   }
 };
 
 /* ============================================================
    מסך 4 — הגדרות משחק
    ============================================================ */
-Screens.setup = {
-  html(){
-    const saved = Store.get(KEY_SETTINGS, {});
-    const names = saved.names || ['', '', '', ''];
-    const count = saved.count || 2;
-    const lvl   = saved.level || 'medium';
-    const host  = saved.hostMode || 'ai';
-    const ansMode = saved.answerMode || 'host';
-    const cats  = saved.cats || Object.keys(CATS).filter(k => k !== 'fam');
-    const famN  = customQuestions().length;
-
-    const playerRow = i => `
-      <div class="row gap-2" data-prow="${i}">
-        <span class="chip chip-player">${i + 1}</span>
-        <input class="field flex-1" data-name="${i}" maxlength="14"
-               placeholder="שם השחקן/ית" value="${esc(names[i] || '')}">
-      </div>`;
-
-    const lvlCard = c => `
-      <button type="button" class="card-pick ${lvl === c.key ? 'on' : ''}" data-lvl="${c.key}">
-        <div class="row"><span class="text-2xl">${c.emoji}</span><b class="text-lg">${esc(c.name)}</b></div>
-        <div class="chip chip-chaser my-1">${esc(c.title)}</div>
-        <div class="muted text-sm">${esc(c.blurb)}</div>
-        <div class="muted text-xs mt-2">דיוק ~${Math.round(c.accuracy * 100)}% · מהירות ${c.pace.toFixed(1)} שנ׳ לשאלה</div>
-      </button>`;
-
-    const catBox = k => `
-      <label class="pick ${cats.includes(k) ? 'on' : ''}" data-catbox="${k}">
-        <input type="checkbox" data-cat="${k}" ${cats.includes(k) ? 'checked' : ''}>
-        <span>${CATS[k].icon} ${esc(CATS[k].name)}</span>
-        <span class="muted text-xs mr-auto">${RAW[k].length}</span>
-      </label>`;
-
-    return `
-    ${topBar('הגדרות המשחק', 'לפני שמתחילים')}
-    <div class="grid gap-3 lg:grid-cols-2">
-
-      <div class="panel panel-pad grid gap-3 content-start">
-        <b class="text-lg">מי משחק?</b>
-        <div class="row" role="group" aria-label="מספר שחקנים">
-          ${[1,2,3,4].map(n => `<button type="button" class="btn ${count === n ? 'btn-gold' : ''}" data-count="${n}">${n}</button>`).join('')}
-          <span class="muted text-sm">שחקנים</span>
-        </div>
-        <div class="grid gap-2" id="s-players">${[0,1,2,3].map(playerRow).join('')}</div>
-      </div>
-
-      <div class="panel panel-pad grid gap-3 content-start">
-        <b class="text-lg">מי מנהל את הצ׳ייסר?</b>
-        <div class="grid-2">
-          <button type="button" class="card-pick ${host === 'ai' ? 'on' : ''}" data-host="ai">
-            <div class="row"><span class="text-2xl">🤖</span><b>צ׳ייסר ממוחשב</b></div>
-            <div class="muted text-sm mt-1">המחשב עונה בעצמו לפי רמת הקושי.</div>
-          </button>
-          <button type="button" class="card-pick ${host === 'human' ? 'on' : ''}" data-host="human">
-            <div class="row"><span class="text-2xl">🎤</span><b>מנחה אנושי</b></div>
-            <div class="muted text-sm mt-1">אחד מכם משחק את הצ׳ייסר ובוחר את תשובותיו.</div>
-          </button>
-        </div>
-        <b class="text-lg mt-1">מי רואה את התשובה?</b>
-        <div class="grid-2">
-          <button type="button" class="card-pick ${ansMode === 'host' ? 'on' : ''}" data-ansmode="host">
-            <div class="row"><span class="text-2xl">📱</span><b>המכשיר ביד המנחה</b></div>
-            <div class="muted text-sm mt-1">התשובה מוצגת מתחת לשאלה. מקריאים בקול ומשפטים מיד.</div>
-          </button>
-          <button type="button" class="card-pick ${ansMode === 'shared' ? 'on' : ''}" data-ansmode="shared">
-            <div class="row"><span class="text-2xl">📺</span><b>מסך שכולם רואים</b></div>
-            <div class="muted text-sm mt-1">התשובה מוסתרת עד שלוחצים "הצג תשובה".</div>
-          </button>
-        </div>
-        <b class="text-lg mt-1">נושאים</b>
-        <div class="grid-2" id="s-cats">${Object.keys(RAW).map(catBox).join('')}</div>
-        <label class="pick ${famN ? '' : 'opacity-50'}" id="s-fambox">
-          <input type="checkbox" id="s-fam" ${famN ? 'checked' : ''} ${famN ? '' : 'disabled'}>
-          <span>${CATS.fam.icon} ${esc(CATS.fam.name)}</span>
-          <span class="muted text-xs mr-auto">${famN}</span>
-        </label>
-      </div>
-
-      <div class="panel panel-pad grid gap-3 lg:col-span-2">
-        <b class="text-lg">רמת הצ׳ייסר</b>
-        <div class="grid-3" id="s-lvls">${Object.values(CHASERS).map(lvlCard).join('')}</div>
-      </div>
-    </div>
-
-    <div class="mt-4 text-center grid gap-2 justify-center">
-      <button class="btn btn-gold btn-xl glow px-10" id="s-start">▶ מתחילים!</button>
-      <button class="btn btn-ghost" id="s-back">חזרה לתפריט</button>
-      <p class="muted text-sm hidden" id="s-warn">בחרו לפחות נושא אחד.</p>
-    </div>`;
-  },
-
-  mount(){
-    mountTopBar();
-    $('#btn-quit').classList.add('hidden');
-    const saved = Store.get(KEY_SETTINGS, {});
-    let count = saved.count || 2;
-    let level = saved.level || 'medium';
-    let host  = saved.hostMode || 'ai';
-    let ansMode = saved.answerMode || 'host';
-
-    const paintCount = () => {
-      $$('[data-count]').forEach(b => b.classList.toggle('btn-gold', +b.dataset.count === count));
-      $$('[data-prow]').forEach(r => r.classList.toggle('hidden', +r.dataset.prow >= count));
-    };
-    paintCount();
-    bind('[data-count]', 'click', e => { count = +e.currentTarget.dataset.count; Sound.init(); Sound.beep(); paintCount(); });
-
-    bind('[data-lvl]', 'click', e => {
-      level = e.currentTarget.dataset.lvl;
-      $$('[data-lvl]').forEach(b => b.classList.toggle('on', b.dataset.lvl === level));
-      Sound.init(); Sound.beep();
-    });
-    bind('[data-host]', 'click', e => {
-      host = e.currentTarget.dataset.host;
-      $$('[data-host]').forEach(b => b.classList.toggle('on', b.dataset.host === host));
-      Sound.init(); Sound.beep();
-    });
-    bind('[data-ansmode]', 'click', e => {
-      ansMode = e.currentTarget.dataset.ansmode;
-      $$('[data-ansmode]').forEach(b => b.classList.toggle('on', b.dataset.ansmode === ansMode));
-      Sound.init(); Sound.beep();
-    });
-    bind('[data-cat]', 'change', e => {
-      e.currentTarget.closest('label').classList.toggle('on', e.currentTarget.checked);
-    });
-
-    $('#s-start').addEventListener('click', () => {
-      const cats = $$('[data-cat]').filter(c => c.checked).map(c => c.dataset.cat);
-      if (!cats.length){ $('#s-warn').classList.remove('hidden'); return; }
-      const names = $$('[data-name]').map(i => i.value.trim());
-      const players = [];
-      for (let i = 0; i < count; i++)
-        players.push({ id: i, name: names[i] || `שחקן ${i + 1}`, bank: 0, status:'pending', offer: null });
-
-      state.players   = players;
-      state.current   = 0;
-      state.chaser    = CHASERS[level];
-      state.hostMode  = host;
-      state.answerMode = ansMode;
-      state.cats      = cats;
-      state.useFamily = $('#s-fam').checked && customQuestions().length > 0;
-      state.teamBank  = 0;
-      buildPool();
-
-      Store.set(KEY_SETTINGS, { ...Store.get(KEY_SETTINGS, {}), names, count, level, hostMode: host, answerMode: ansMode, cats });
-      Sound.init(); Sound.offer();
-      go('ready');
-    });
-    $('#s-back').addEventListener('click', () => go('menu'));
-  }
-};
 </script>
 <script>
 /* ============================================================
@@ -2495,10 +2326,330 @@ Screens.results = {
       state.current = 0; state.teamBank = 0; buildPool();
       go('ready');
     });
-    $('#menu').addEventListener('click', () => go('menu'));
+    $('#menu').addEventListener('click', () => { state.step = 0; go('start'); });
   }
 };
 
+</script>
+<script>
+/* ============================================================
+   מסך הפתיחה — רצף אחד
+   בוחרים איזה מסך זה, מי משחק, איזה צ׳ייסר ואילו נושאים — בזה אחר זה,
+   וכל שלב מוצג רק למי שהוא מתאים לו. מסך הקרנה ומסך צ׳ייסר יוצאים
+   מהרצף מיד, בלי שנשאלו על שמות שחקנים.
+   ============================================================ */
+const FLOW = {
+  /* השלבים שרלוונטיים למכשיר הנוכחי */
+  steps(){
+    const base = [{ id:'screen', name:'המסך' }];
+    if (state.device === 'screen' || state.device === 'chaser') return base;
+    return base.concat(
+      { id:'players', name:'השחקנים' },
+      { id:'chaser',  name:'הצ׳ייסר' },
+      { id:'topics',  name:'הנושאים' },
+      ...(state.device === 'solo' ? [{ id:'display', name:'התשובות' }] : [])
+    );
+  },
+  draft(){
+    const saved = Store.get(KEY_SETTINGS, {});
+    return {
+      names: saved.names || ['', '', '', ''],
+      count: saved.count || 2,
+      level: saved.level || 'medium',
+      host:  saved.hostMode || 'ai',
+      ans:   saved.answerMode || 'host',
+      cats:  saved.cats || Object.keys(CATS).filter(k => k !== 'fam'),
+      fam:   true
+    };
+  }
+};
+
+Screens.start = {
+  html(){
+    const d = state.draft || (state.draft = FLOW.draft());
+    const steps = FLOW.steps();
+    const i = clamp(state.step || 0, 0, steps.length - 1);
+    const step = steps[i];
+
+    const dots = steps.map((s, n) => `
+      <span class="fstep ${n === i ? 'on' : ''} ${n < i ? 'done' : ''}">${esc(s.name)}</span>`).join('');
+
+    return `
+    <div class="flow">
+      <header class="spread">
+        <div>
+          <div class="eyebrow">משחק טריוויה משפחתי</div>
+          <h1 class="logo text-3xl sm:text-5xl">הצ׳ייסר</h1>
+        </div>
+        <div class="row">
+          <button class="btn btn-icon" id="f-sound" aria-label="קול">${Sound.muted ? '🔇' : '🔊'}</button>
+          <button class="btn btn-icon" id="f-rules">📖 איך משחקים</button>
+        </div>
+      </header>
+
+      <div class="fsteps">${dots}</div>
+
+      <div id="f-body">${this.body(step.id, d)}</div>
+
+      <div class="frow">
+        ${i > 0 ? '<button class="btn btn-lg" id="f-back">→ חזרה</button>' : '<span></span>'}
+        <button class="btn btn-gold btn-xl glow px-10" id="f-next">${
+          step.id === 'screen' ? 'בחרו מסך' :
+          (i === steps.length - 1 ? '▶ מתחילים!' : 'הבא ←')}</button>
+      </div>
+      <p class="muted text-sm text-center hidden" id="f-warn"></p>
+    </div>`;
+  },
+
+  /* ---------- גוף כל שלב ---------- */
+  body(id, d){
+    if (id === 'screen'){
+      const card = (key, emoji, title, note) => `
+        <button type="button" class="card-pick ${state.device === key ? 'on' : ''}" data-dev="${key}">
+          <div class="row"><span class="text-2xl">${emoji}</span><b class="text-lg">${title}</b></div>
+          <div class="muted text-sm mt-1">${note}</div>
+        </button>`;
+      return `
+      <div class="panel panel-pad grid gap-3">
+        <b class="text-lg">איזה מסך זה?</b>
+        <p class="muted text-sm">כל מכשיר פותח את אותו קישור ובוחר את התפקיד שלו.</p>
+        <div class="grid gap-2">
+          ${card('solo',   '🎮', 'מסך אחד',      'הכול על המכשיר הזה — הדרך הפשוטה.')}
+          <div id="f-multi" class="grid gap-2">
+            ${card('host',   '📱', 'מסך מנחה',    'הטלפון שמריץ את המשחק, רואה תשובות ושולט.')}
+            ${card('screen', '📺', 'מסך הקרנה',   'הטלוויזיה או המקרן. לוח, שעון וכסף — בלי תשובות.')}
+            ${card('chaser', '😈', 'מסך הצ׳ייסר', 'הטלפון של מי שמשחק את הנבל. שאלה ואפשרויות בלבד.')}
+          </div>
+        </div>
+        <p class="muted text-xs" id="f-net">מחפש מכשירים אחרים…</p>
+      </div>`;
+    }
+
+    if (id === 'players'){
+      return `
+      <div class="panel panel-pad grid gap-3">
+        <b class="text-lg">מי משחק?</b>
+        <div class="row" role="group" aria-label="מספר שחקנים">
+          ${[1,2,3,4].map(n => `<button type="button" class="btn ${d.count === n ? 'btn-gold' : ''}" data-count="${n}">${n}</button>`).join('')}
+          <span class="muted text-sm">שחקנים</span>
+        </div>
+        <div class="grid gap-2" id="s-players">
+          ${[0,1,2,3].map(i => `
+            <div class="row gap-2 ${i >= d.count ? 'hidden' : ''}" data-prow="${i}">
+              <span class="chip chip-player">${i + 1}</span>
+              <input class="field flex-1" data-name="${i}" maxlength="14"
+                     placeholder="שם השחקן/ית" value="${esc(d.names[i] || '')}">
+            </div>`).join('')}
+        </div>
+      </div>`;
+    }
+
+    if (id === 'chaser'){
+      const lvlCard = c => `
+        <button type="button" class="card-pick ${d.level === c.key ? 'on' : ''}" data-lvl="${c.key}">
+          <div class="row"><span class="text-2xl">${c.emoji}</span><b class="text-lg">${esc(c.name)}</b></div>
+          <div class="chip chip-chaser my-1">${esc(c.title)}</div>
+          <div class="muted text-sm">${esc(c.blurb)}</div>
+          <div class="muted text-xs mt-2">דיוק ~${Math.round(c.accuracy * 100)}% · מהירות ${c.pace.toFixed(1)} שנ׳ לשאלה</div>
+        </button>`;
+      return `
+      <div class="grid gap-3">
+        <div class="panel panel-pad grid gap-3">
+          <b class="text-lg">רמת הצ׳ייסר</b>
+          <div class="grid-3" id="s-lvls">${Object.values(CHASERS).map(lvlCard).join('')}</div>
+        </div>
+        <div class="panel panel-pad grid gap-3">
+          <b class="text-lg">מי מנהל אותו?</b>
+          <div class="grid-2">
+            <button type="button" class="card-pick ${d.host === 'ai' ? 'on' : ''}" data-host="ai">
+              <div class="row"><span class="text-2xl">🤖</span><b>צ׳ייסר ממוחשב</b></div>
+              <div class="muted text-sm mt-1">המחשב עונה בעצמו לפי רמת הקושי.</div>
+            </button>
+            <button type="button" class="card-pick ${d.host === 'human' ? 'on' : ''}" data-host="human">
+              <div class="row"><span class="text-2xl">🎤</span><b>מנחה אנושי</b></div>
+              <div class="muted text-sm mt-1">אחד מכם משחק את הצ׳ייסר ובוחר את תשובותיו.</div>
+            </button>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    if (id === 'topics'){
+      const famN = customQuestions().length;
+      const catBox = k => `
+        <label class="pick ${d.cats.includes(k) ? 'on' : ''}" data-catbox="${k}">
+          <input type="checkbox" data-cat="${k}" ${d.cats.includes(k) ? 'checked' : ''}>
+          <span>${CATS[k].icon} ${esc(CATS[k].name)}</span>
+          <span class="muted text-xs mr-auto">${RAW[k].length}</span>
+        </label>`;
+      return `
+      <div class="panel panel-pad grid gap-3">
+        <b class="text-lg">על מה נשחק?</b>
+        <div class="grid-2" id="s-cats">${Object.keys(RAW).map(catBox).join('')}</div>
+        <label class="pick ${famN ? '' : 'opacity-50'}" id="s-fambox">
+          <input type="checkbox" id="s-fam" ${famN ? 'checked' : ''} ${famN ? '' : 'disabled'}>
+          <span>${CATS.fam.icon} ${esc(CATS.fam.name)}</span>
+          <span class="muted text-xs mr-auto">${famN}</span>
+        </label>
+        <button class="btn" id="f-custom">✏️ ${famN ? 'עריכת השאלות המשפחתיות' : 'הוספת שאלות על המשפחה'}</button>
+      </div>`;
+    }
+
+    /* display */
+    return `
+    <div class="panel panel-pad grid gap-3">
+      <b class="text-lg">מי רואה את התשובה?</b>
+      <p class="muted text-sm">התשובה חייבת להיות גלויה למי שמאשר — השאלה היא רק אם גם כולם רואים את המסך.</p>
+      <div class="grid-2">
+        <button type="button" class="card-pick ${d.ans === 'host' ? 'on' : ''}" data-ansmode="host">
+          <div class="row"><span class="text-2xl">📱</span><b>המכשיר ביד המנחה</b></div>
+          <div class="muted text-sm mt-1">התשובה מוצגת מתחת לשאלה. מקריאים בקול ומשפטים מיד.</div>
+        </button>
+        <button type="button" class="card-pick ${d.ans === 'shared' ? 'on' : ''}" data-ansmode="shared">
+          <div class="row"><span class="text-2xl">📺</span><b>מסך שכולם רואים</b></div>
+          <div class="muted text-sm mt-1">התשובה מוסתרת עד שלוחצים "הצג תשובה".</div>
+        </button>
+      </div>
+    </div>`;
+  },
+
+  mount(){
+    const d = state.draft;
+    const steps = FLOW.steps();
+    const i = clamp(state.step || 0, 0, steps.length - 1);
+    const step = steps[i];
+    const warn = msg => { const w = $('#f-warn'); w.textContent = msg; w.classList.remove('hidden'); };
+
+    $('#f-rules').addEventListener('click', () => go('rules'));
+    const sb = $('#f-sound');
+    sb.addEventListener('click', () => {
+      Sound.init(); Sound.setMuted(!Sound.muted);
+      sb.textContent = Sound.muted ? '🔇' : '🔊';
+    });
+    const back = $('#f-back');
+    if (back) back.addEventListener('click', () => { state.step = i - 1; go('start'); });
+
+    /* ---------- שלב המסך ---------- */
+    if (step.id === 'screen'){
+      const note = $('#f-net');
+      const multi = $$('#f-multi [data-dev]');
+      const setEnabled = on => multi.forEach(b => {
+        b.disabled = !on;
+        b.style.opacity = on ? '' : '.4';
+        b.style.cursor  = on ? '' : 'not-allowed';
+      });
+      setEnabled(Net.ready);
+      if (Net.ready) note.textContent = 'מכשירים אחרים יכולים להצטרף עכשיו.';
+      else {
+        note.textContent = 'מחפש מכשירים אחרים…';
+        Net.init().then(ok => {
+          const el = $('#f-net');
+          if (!el) return;
+          setEnabled(ok);
+          el.textContent = ok
+            ? 'מכשירים אחרים יכולים להצטרף עכשיו.'
+            : 'אין חיבור בין מכשירים כאן — אפשר לשחק על מסך אחד.';
+        });
+      }
+
+      bind('[data-dev]', 'click', e => {
+        state.device = e.currentTarget.dataset.dev;
+        $$('[data-dev]').forEach(b => b.classList.toggle('on', b.dataset.dev === state.device));
+        Sound.init(); Sound.beep();
+      }, document);
+    }
+
+    /* ---------- שלב השחקנים ---------- */
+    if (step.id === 'players'){
+      const paint = () => {
+        $$('[data-count]').forEach(b => b.classList.toggle('btn-gold', +b.dataset.count === d.count));
+        $$('[data-prow]').forEach(r => r.classList.toggle('hidden', +r.dataset.prow >= d.count));
+      };
+      bind('[data-count]', 'click', e => { d.count = +e.currentTarget.dataset.count; Sound.init(); Sound.beep(); paint(); });
+      bind('[data-name]', 'input', e => { d.names[+e.currentTarget.dataset.name] = e.currentTarget.value; });
+      paint();
+    }
+
+    /* ---------- שלב הצ׳ייסר ---------- */
+    if (step.id === 'chaser'){
+      bind('[data-lvl]', 'click', e => {
+        d.level = e.currentTarget.dataset.lvl;
+        $$('[data-lvl]').forEach(b => b.classList.toggle('on', b.dataset.lvl === d.level));
+        Sound.init(); Sound.beep();
+      });
+      bind('[data-host]', 'click', e => {
+        d.host = e.currentTarget.dataset.host;
+        $$('[data-host]').forEach(b => b.classList.toggle('on', b.dataset.host === d.host));
+        Sound.init(); Sound.beep();
+      });
+    }
+
+    /* ---------- שלב הנושאים ---------- */
+    if (step.id === 'topics'){
+      bind('[data-cat]', 'change', e => {
+        e.currentTarget.closest('label').classList.toggle('on', e.currentTarget.checked);
+        d.cats = $$('[data-cat]').filter(c => c.checked).map(c => c.dataset.cat);
+      });
+      $('#f-custom').addEventListener('click', () => { state.step = i; go('custom'); });
+    }
+
+    /* ---------- שלב התשובות ---------- */
+    if (step.id === 'display'){
+      bind('[data-ansmode]', 'click', e => {
+        d.ans = e.currentTarget.dataset.ansmode;
+        $$('[data-ansmode]').forEach(b => b.classList.toggle('on', b.dataset.ansmode === d.ans));
+        Sound.init(); Sound.beep();
+      });
+    }
+
+    /* ---------- קדימה ---------- */
+    const next = () => {
+      Sound.init();
+      if (step.id === 'screen'){
+        if (!state.device) return warn('בחרו איזה מסך זה.');
+        if (state.device === 'screen'){ Net.standby(); return go('projector'); }
+        if (state.device === 'chaser') return go('chaserPhone');
+        if (state.device === 'host') startBroadcast();
+        state.step = 1; return go('start');
+      }
+      if (step.id === 'players'){
+        d.names = $$('[data-name]').map(x => x.value.trim());
+        state.step = i + 1; return go('start');
+      }
+      if (step.id === 'topics' && !d.cats.length) return warn('בחרו לפחות נושא אחד.');
+
+      if (i < steps.length - 1){ state.step = i + 1; return go('start'); }
+      Screens.start.begin(d);
+    };
+    $('#f-next').addEventListener('click', next);
+    onKeys({ Enter: next });
+  },
+
+  /* ---------- התחלת המשחק ---------- */
+  begin(d){
+    const players = [];
+    for (let i = 0; i < d.count; i++)
+      players.push({ id:i, name: d.names[i] || `שחקן ${i + 1}`, bank:0, status:'pending', offer:null });
+
+    state.players    = players;
+    state.current    = 0;
+    state.chaser     = CHASERS[d.level];
+    state.hostMode   = d.host;
+    /* על שני מסכים התשובה תמיד פרטית למנחה — אין טעם להסתיר אותה ממנו */
+    state.answerMode = state.device === 'host' ? 'host' : d.ans;
+    state.cats       = d.cats;
+    state.useFamily  = !!($('#s-fam') && $('#s-fam').checked) && customQuestions().length > 0;
+    state.teamBank   = 0;
+    buildPool();
+
+    Store.set(KEY_SETTINGS, { ...Store.get(KEY_SETTINGS, {}),
+      names: d.names, count: d.count, level: d.level,
+      hostMode: d.host, answerMode: d.ans, cats: d.cats });
+
+    Sound.offer();
+    go('ready');
+  }
+};
 </script>
 <script>
 /* ============================================================
@@ -2631,55 +2782,6 @@ function startBroadcast(){
 /* ============================================================
    בחירת תפקיד המכשיר
    ============================================================ */
-Screens.role = {
-  html(){
-    return `
-    <div class="hero">
-      <div class="eyebrow mb-2">הצ׳ייסר</div>
-      <h1 class="logo text-5xl sm:text-6xl mb-2">איזה מסך זה?</h1>
-      <p class="muted mb-6 max-w-lg">
-        פתחו את אותו קישור בשני מכשירים: אחד מחובר למקרן או לטלוויזיה, והשני נשאר ביד.
-      </p>
-      <div class="grid gap-3 w-full max-w-lg">
-        <button class="card-pick" id="r-screen">
-          <div class="row"><span class="text-2xl">📺</span><b class="text-lg">מסך הקרנה</b></div>
-          <div class="muted text-sm mt-1">המכשיר שמחובר למקרן. מציג לוח, שעון וכסף — בלי תשובות ובלי כפתורים.</div>
-        </button>
-        <button class="card-pick" id="r-host">
-          <div class="row"><span class="text-2xl">📱</span><b class="text-lg">מסך מנחה</b></div>
-          <div class="muted text-sm mt-1">הטלפון שביד. מריץ את המשחק, רואה את התשובות ושולט בהכול.</div>
-        </button>
-        <button class="card-pick" id="r-chaser">
-          <div class="row"><span class="text-2xl">😈</span><b class="text-lg">מסך הצ׳ייסר</b></div>
-          <div class="muted text-sm mt-1">טלפון של מי שמשחק את הצ׳ייסר. רואה רק את השאלה ואת שלוש האפשרויות — אף פעם לא את התשובה.</div>
-        </button>
-        <button class="card-pick" id="r-solo">
-          <div class="row"><span class="text-2xl">🎮</span><b class="text-lg">מסך אחד</b></div>
-          <div class="muted text-sm mt-1">כמו עד היום — הכול על מכשיר אחד.</div>
-        </button>
-      </div>
-      <p class="muted text-xs mt-6" id="r-note"></p>
-    </div>`;
-  },
-  mount(){
-    const note = $('#r-note');
-    note.textContent = Net.ready
-      ? 'שני המכשירים כבר מחוברים זה לזה.'
-      : 'אין חיבור בין מכשירים כאן — אפשר לשחק על מסך אחד.';
-    ['#r-screen', '#r-host', '#r-chaser'].forEach(sel => {
-      const b = $(sel);
-      b.disabled = !Net.ready;
-      if (!Net.ready){ b.style.opacity = '.4'; b.style.cursor = 'not-allowed'; }
-    });
-    $('#r-solo').addEventListener('click', () => { state.device = 'solo'; Sound.init(); go('menu'); });
-    $('#r-host').addEventListener('click', () => {
-      state.device = 'host'; Sound.init(); startBroadcast(); go('menu');
-    });
-    $('#r-screen').addEventListener('click', () => { state.device = 'screen'; Net.standby(); go('projector'); });
-    $('#r-chaser').addEventListener('click', () => { state.device = 'chaser'; Sound.init(); go('chaserPhone'); });
-  }
-};
-
 /* ============================================================
    מסך ההקרנה — קורא בלבד
    ============================================================ */
@@ -2695,7 +2797,7 @@ Screens.projector = {
     const root = $('#proj');
     const back = document.createElement('button');
     back.className = 'proj-exit'; back.textContent = 'החלפת תפקיד';
-    back.addEventListener('click', () => { state.device = 'solo'; go('role'); });
+    back.addEventListener('click', () => { state.device = null; state.step = 0; go('start'); });
     APP().appendChild(back);
     let last = '';
     const un = Net.watch(snap => {
@@ -2735,7 +2837,7 @@ Screens.chaserPhone = {
     </div>`;
   },
   mount(){
-    $('#chp-exit').addEventListener('click', () => { state.device = 'solo'; go('role'); });
+    $('#chp-exit').addEventListener('click', () => { state.device = null; state.step = 0; go('start'); });
     const body = $('#chp-body');
     let lastKey = '', lastQn = null, picked = null;
 
@@ -2960,17 +3062,16 @@ function projectorHtml(s){
    הפעלה
    ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
-  go('menu');
+  state.step = 0;
+  go('start');
   /* פתיחת הקול מחייבת מחוות משתמש — נתפוס את הראשונה שתגיע */
   const unlock = () => { Sound.init(); Sound.resume(); };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
 
-  /* ערוץ בין מכשירים מגיע מאוחר יותר, אם בכלל. עד אז המשחק כבר עובד
-     על מסך אחד; ברגע שהוא זמין מציעים לבחור תפקיד למכשיר. */
-  Net.init().then(ok => {
-    if (ok && state.screen === 'menu' && state.device === 'solo') go('role');
-  });
+  /* הערוץ בין המכשירים מגיע מאוחר יותר, אם בכלל — שלב "איזה מסך זה"
+     כבר מוצג, ורק מפעיל את האפשרויות הרב-מכשיריות כשהן נעשות זמינות. */
+  Net.init();
 });
 
 /* וו לבדיקות אוטומטיות */

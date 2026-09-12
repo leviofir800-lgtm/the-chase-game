@@ -81,6 +81,38 @@ async function playChase(page, { win }){
   }
 }
 
+
+/**
+ * עובר את רצף הפתיחה: המסך → השחקנים → הצ׳ייסר → הנושאים → (התשובות).
+ * שלב "התשובות" מוצג רק ב"מסך אחד", ולכן ans נשלח רק שם.
+ */
+async function startGame(page, { device = 'solo', players = 1, names = [], level = 'medium',
+                                 host = 'ai', ans = 'host' } = {}){
+  await page.waitForSelector('[data-dev]');
+  if (device !== 'solo') await page.waitForFunction(() => !document.querySelector('[data-dev="host"]').disabled);
+  await page.click(`[data-dev="${device}"]`);
+  await page.click('#f-next');
+
+  await page.waitForSelector(`[data-count="${players}"]`);
+  await page.click(`[data-count="${players}"]`);
+  for (let i = 0; i < names.length; i++) await page.fill(`[data-name="${i}"]`, names[i]);
+  await page.click('#f-next');
+
+  await page.waitForSelector(`[data-lvl="${level}"]`);
+  await page.click(`[data-lvl="${level}"]`);
+  await page.click(`[data-host="${host}"]`);
+  await page.click('#f-next');
+
+  await page.waitForSelector('[data-cat]');
+  await page.click('#f-next');
+
+  if (device === 'solo'){
+    await page.waitForSelector(`[data-ansmode="${ans}"]`);
+    await page.click(`[data-ansmode="${ans}"]`);
+    await page.click('#f-next');
+  }
+}
+
 async function run(tag, viewport){
   console.log(`\n▶ מסלול מלא ב-${viewport.width}px`);
   const browser = await chromium.launch();
@@ -93,12 +125,17 @@ async function run(tag, viewport){
   page.on('requestfailed', r => { if (CDN.test(r.url())) cdnBlocked.push(r.url()); });
 
   await page.goto(URL_, { waitUntil: 'domcontentloaded' });
-  await page.waitForSelector('#m-new');
+  await page.waitForSelector('[data-dev]');
   await shot(page, tag, '01-menu');
-  ok('התפריט נטען');
+  ok('רצף הפתיחה נטען');
 
-  // --- שאלה משפחתית מותאמת ---
-  await page.click('#m-custom');
+  // --- שאלה משפחתית מותאמת: נכנסים אליה משלב הנושאים ---
+  await page.click('[data-dev="solo"]');
+  await page.click('#f-next');
+  await page.click('#f-next');
+  await page.click('#f-next');
+  await page.waitForSelector('#f-custom');
+  await page.click('#f-custom');
   await page.fill('#c-q',  'מה שם הכלב של המשפחה?');
   await page.fill('#c-a',  'לונה');
   await page.fill('#c-w1', 'רקסי');
@@ -108,16 +145,12 @@ async function run(tag, viewport){
   customCount.trim() === '1' ? ok('שאלה משפחתית נשמרה') : fail('שאלה משפחתית לא נשמרה (' + customCount + ')');
   await shot(page, tag, '02-custom');
 
-  // --- הגדרות ---
-  await page.click('#c-play');
-  await page.waitForSelector('#s-start');
-  await page.click('[data-count="2"]');
-  await page.fill('[data-name="0"]', 'נועה');
-  await page.fill('[data-name="1"]', 'איתי');
-  await page.click('[data-lvl="medium"]');
-  await page.click('[data-ansmode="host"]');
+  // --- חזרה לרצף והתחלת משחק ---
+  // (הריענון גם מוודא שהשאלה המשפחתית שרדה)
+  await page.click('#c-back');
+  await page.reload({ waitUntil: 'domcontentloaded' });
   await shot(page, tag, '03-setup');
-  await page.click('#s-start');
+  await startGame(page, { players: 2, names: ['נועה', 'איתי'], level: 'medium', ans: 'host' });
 
   // ============ שחקן 1 — מגיע הביתה ============
   await waitScreen(page, 'ready');
@@ -229,11 +262,7 @@ async function runSharedScreen(){
   const page = await (await browser.newContext({ viewport:{ width:1280, height:900 }, locale:'he-IL' })).newPage();
   await page.goto(URL_, { waitUntil:'domcontentloaded' });
 
-  await page.click('#m-new');
-  await page.waitForSelector('#s-start');
-  await page.click('[data-count="1"]');
-  await page.click('[data-ansmode="shared"]');
-  await page.click('#s-start');
+  await startGame(page, { players: 1, ans: 'shared' });
   await waitScreen(page, 'ready');
   await page.click('#go');
   await waitScreen(page, 'cash');
@@ -261,6 +290,61 @@ async function runSharedScreen(){
   await browser.close();
 }
 
+
+/** רצף הפתיחה: כל שלב מוצג רק למי שהוא מתאים לו */
+async function runFlow(){
+  console.log('\n▶ רצף הפתיחה');
+  const browser = await chromium.launch();
+  const page = await (await browser.newContext({ viewport:{ width:390, height:844 }, locale:'he-IL' })).newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(URL_, { waitUntil:'domcontentloaded' });
+
+  // הציור הראשון הוא שלב "איזה מסך זה" — בלי הבהוב תפריט
+  await page.waitForSelector('[data-dev]');
+  const first = await page.evaluate(() => window.__chase.state.screen);
+  first === 'start' ? ok('הטעינה נופלת ישר על רצף הפתיחה')
+                    : fail('הטעינה נפלה על ' + first);
+
+  // "מסך אחד" זמין תמיד, גם בלי ערוץ בין מכשירים
+  const soloLive = await page.evaluate(() => !document.querySelector('[data-dev="solo"]').disabled);
+  soloLive ? ok('"מסך אחד" זמין גם בלי חיבור בין מכשירים')
+           : fail('"מסך אחד" לא זמין');
+
+  // מסך אחד עובר את כל חמשת השלבים, כולל שלב התשובות
+  await page.click('[data-dev="solo"]');
+  const soloSteps = await page.evaluate(() => window.__chase.Screens.start ? null : null);
+  await page.click('#f-next');
+  await page.waitForSelector('[data-count="1"]');
+  await page.click('#f-next');
+  await page.waitForSelector('[data-lvl="medium"]');
+  await page.click('#f-next');
+  await page.waitForSelector('[data-cat]');
+  await page.click('#f-next');
+  const hasDisplay = await page.waitForSelector('[data-ansmode]', { timeout: 4000 }).then(() => true).catch(() => false);
+  hasDisplay ? ok('ב"מסך אחד" נשאלת שאלת מי רואה את התשובה')
+             : fail('שלב התשובות לא הופיע ב"מסך אחד"');
+  await page.screenshot({ path: path.join(SHOTS, 'flow-steps.png') });
+
+  // מסך הקרנה יוצא מיד — בלי שנשאל על שמות שחקנים
+  await page.reload({ waitUntil:'domcontentloaded' });
+  await page.waitForSelector('[data-dev]');
+  const reached = await page.evaluate(async () => {
+    const c = window.__chase;
+    c.state.device = 'screen';
+    c.state.step = 0;
+    document.querySelector('[data-dev="screen"]').click();
+    document.getElementById('f-next').click();
+    await new Promise(r => setTimeout(r, 200));
+    return c.state.screen;
+  });
+  reached === 'projector' ? ok('"מסך הקרנה" מדלג ישר להקרנה, בלי שלב שחקנים')
+                          : fail('"מסך הקרנה" הגיע ל-' + reached);
+
+  errors.length ? fail('שגיאות: ' + errors.slice(0,3).join(' | ')) : ok('אין שגיאות');
+  await browser.close();
+}
+
 /** מסך הצ׳ייסר: רואה שאלה ואפשרויות, לעולם לא את התשובה */
 async function runChaserRole(){
   console.log('\n▶ מסך הצ׳ייסר');
@@ -272,12 +356,7 @@ async function runChaserRole(){
 
   // מנחה אנושי + מצב "המכשיר ביד המנחה" — כאן התשובה גלויה למנחה כל הזמן,
   // וזה בדיוק המצב שבו דליפה לשידור הייתה מתרחשת.
-  await page.click('#m-new');
-  await page.waitForSelector('#s-start');
-  await page.click('[data-count="1"]');
-  await page.click('[data-host="human"]');
-  await page.click('[data-ansmode="host"]');
-  await page.click('#s-start');
+  await startGame(page, { players: 1, host: 'human', ans: 'host' });
   await waitScreen(page, 'ready');
   await page.click('#go');
   await waitScreen(page, 'cash');
@@ -344,11 +423,7 @@ async function runProjector(){
   await page.goto(URL_, { waitUntil:'domcontentloaded' });
 
   // שחקן אחד, מצב "מסך שכולם רואים" כדי שהתשובה לא תיחשף מאליה
-  await page.click('#m-new');
-  await page.waitForSelector('#s-start');
-  await page.click('[data-count="1"]');
-  await page.click('[data-ansmode="shared"]');
-  await page.click('#s-start');
+  await startGame(page, { players: 1, ans: 'shared' });
   await waitScreen(page, 'ready');
   await page.click('#go');
   await waitScreen(page, 'cash');
@@ -423,7 +498,7 @@ async function runProjector(){
   await browser.close();
 }
 
-/* ONLY=proj|shared|chaser|full מריץ חלק אחד בלבד; בלעדיו רץ הכול */
+/* ONLY=proj|shared|chaser|flow|full מריץ חלק אחד בלבד; בלעדיו רץ הכול */
 const ONLY = process.env.ONLY || '';
 console.log('בדיקת עשן — הצ׳ייסר\nכתובת: ' + URL_);
 if (!ONLY || ONLY === 'full'){
@@ -433,6 +508,7 @@ if (!ONLY || ONLY === 'full'){
 if (!ONLY || ONLY === 'shared') await runSharedScreen();
 if (!ONLY || ONLY === 'proj')   await runProjector();
 if (!ONLY || ONLY === 'chaser') await runChaserRole();
+if (!ONLY || ONLY === 'flow')   await runFlow();
 
 console.log('\nצילומי מסך: ' + SHOTS);
 if (failures){
