@@ -164,6 +164,56 @@ label.pick.on{border-color:var(--gold); background:rgba(245,197,24,.14)}
 .opt.right{border-color:var(--ok)!important; background:rgba(34,197,94,.24)!important}
 .opt.wrongpick{border-color:var(--bad)!important; background:rgba(239,68,68,.2)!important}
 
+
+/* ---------- מסך ההקרנה ---------- */
+.proj{
+  position:fixed; inset:0; display:grid; grid-template-rows:auto 1fr;
+  gap:clamp(10px,1.4vh,22px); padding:clamp(12px,2.2vmin,32px);
+  background:var(--bg); overflow:hidden;
+}
+.proj-head{display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap}
+.proj-head .chip{font-size:clamp(.7rem,1.5vmin,1.05rem)}
+.proj-head .eyebrow{font-size:clamp(.62rem,1.3vmin,.9rem)}
+.proj-body{min-height:0; display:grid; gap:clamp(12px,2.4vmin,34px)}
+.proj-wait{display:grid; place-content:center; text-align:center; height:100%}
+.proj-center{place-content:center; text-align:center; justify-items:center}
+.proj-big{font-size:clamp(2rem,7vmin,5rem); font-weight:900; line-height:1.05}
+.proj-huge{font-size:clamp(2.6rem,11vmin,8rem); line-height:1}
+.proj-money{font-size:clamp(2rem,8vmin,6rem); font-weight:900; color:var(--gold-2); font-variant-numeric:tabular-nums; line-height:1}
+.proj-who{font-size:clamp(1.4rem,4vmin,3rem); font-weight:900}
+.proj-q{font-size:clamp(1.3rem,4.2vmin,3.4rem); font-weight:800; line-height:1.25; text-wrap:balance}
+.proj-answer{
+  font-size:clamp(1.1rem,3.4vmin,2.6rem); font-weight:900; color:var(--gold-2);
+  border-top:1px dashed rgba(255,255,255,.18); padding-top:.5em;
+}
+.proj-q-wrap{display:grid; gap:clamp(8px,1.8vmin,22px); align-content:center; min-width:0}
+.proj-clock{font-size:clamp(1.8rem,6vmin,4.4rem); font-weight:900; font-variant-numeric:tabular-nums}
+.proj-side{display:grid; gap:clamp(6px,1.2vmin,14px); justify-items:center; align-content:center; text-align:center}
+.proj-ring{width:clamp(90px,20vmin,220px)}
+.proj-ring b{font-size:clamp(1.6rem,6vmin,4rem)}
+.proj-cash{grid-template-columns:1fr}
+.proj-chase,.proj-final{grid-template-columns:1fr}
+@media (min-aspect-ratio:5/4){
+  .proj-cash{grid-template-columns:minmax(0,.9fr) minmax(0,1.6fr); align-items:center}
+  .proj-chase{grid-template-columns:minmax(0,.75fr) minmax(0,1.6fr)}
+  .proj-final{grid-template-columns:minmax(0,.5fr) minmax(0,1.7fr)}
+}
+.proj .board,.proj .ladder{height:100%; min-height:0}
+.proj-board,.proj-ladder{height:100%; min-height:0}
+.proj-board .slot{font-size:clamp(.62rem,1.6vmin,1.1rem)}
+.proj-board .tok{font-size:clamp(.62rem,1.6vmin,1.1rem)}
+.proj-ladder .step{height:auto; flex:1; font-size:clamp(.6rem,1.5vmin,1rem)}
+.proj-opts{display:grid; gap:clamp(6px,1.2vmin,14px)}
+.proj-opts .opt{font-size:clamp(.95rem,2.6vmin,2rem); min-height:0; padding:clamp(.4rem,1.4vmin,1rem) clamp(.6rem,1.6vmin,1.2rem)}
+.proj-opts .badge{width:1.8em; height:1.8em}
+.proj-exit{
+  position:fixed; inset-block-start:8px; inset-inline-start:8px; z-index:5;
+  font:inherit; font-size:.7rem; font-weight:700; color:var(--faint);
+  background:transparent; border:1px solid var(--line); border-radius:8px;
+  padding:.25rem .6rem; cursor:pointer; opacity:.35; transition:opacity .2s;
+}
+.proj-exit:hover,.proj-exit:focus-visible{opacity:1; color:var(--ink)}
+
 /* ---------- כרטיס המנחה ---------- */
 .judgecard{
   border-top:1px dashed rgba(255,255,255,.16); padding-top:.7rem; margin-top:.2rem;
@@ -821,6 +871,7 @@ function addInterval(fn, ms){
   return id;
 }
 function clearAllTimers(){
+  state.clock = null;
   live.timeouts.forEach(clearTimeout);  live.timeouts.clear();
   live.intervals.forEach(clearInterval); live.intervals.clear();
   live.clocks.forEach(c => c.stop());   live.clocks.clear();
@@ -902,6 +953,9 @@ const state = {
   chaser: CHASERS.medium,
   hostMode: 'ai',            // 'ai' | 'human'
   answerMode: 'host',        // 'host' = התשובה גלויה למנחה | 'shared' = מוסתרת עד לחיצה
+  device: 'solo',            // 'solo' | 'host' (טלפון) | 'screen' (מקרן)
+  clock: null,               // השעון הפעיל, לשידור למסך ההקרנה
+  outcome: null,
   cats: Object.keys(CATS).filter(k => k !== 'fam'),
   useFamily: true,
   pool: [], used: new Set(),
@@ -1619,7 +1673,7 @@ Screens.cash = {
       }, T(kind === 'no' ? 750 : 350));
     };
 
-    const clock = new Clock(CASH_SECONDS * 1000, {
+    const clock = state.clock = new Clock(CASH_SECONDS * 1000, {
       onTick: left => { ring.style.setProperty('--p', (left / (CASH_SECONDS * 1000)) * 100); },
       onSecond: s => {
         clockEl.textContent = s;
@@ -2098,7 +2152,7 @@ Screens.finalTeam = {
 
     const draw = () => {
       asked++;
-      q = (passQueue.length && asked % 4 === 0) ? passQueue.shift() : nextQuestion();
+      q = f.q = (passQueue.length && asked % 4 === 0) ? passQueue.shift() : nextQuestion();
       $('#qcat').textContent = CATS[q.cat].icon + ' ' + CATS[q.cat].name;
       $('#q').textContent = q.q;
       Judge.set(q.a);
@@ -2124,7 +2178,7 @@ Screens.finalTeam = {
       }, T(kind === 'no' ? 700 : 320));
     };
 
-    const clock = new Clock(FINAL_SECONDS * 1000, {
+    const clock = state.clock = new Clock(FINAL_SECONDS * 1000, {
       onTick: left => { $('#bar').style.width = (left / (FINAL_SECONDS * 1000) * 100) + '%'; },
       onSecond: s => {
         $('#clock').textContent = mmss(s * 1000);
@@ -2222,7 +2276,7 @@ Screens.finalChaser = {
     };
     paintLadder();
 
-    const clock = new Clock(FINAL_SECONDS * 1000, {
+    const clock = state.clock = new Clock(FINAL_SECONDS * 1000, {
       onTick: left => { $('#bar').style.width = (left / (FINAL_SECONDS * 1000) * 100) + '%'; },
       onSecond: s => {
         $('#clock').textContent = mmss(s * 1000);
@@ -2253,10 +2307,10 @@ Screens.finalChaser = {
     const ask = () => {
       if (over) return;
       busy = false;
-      q = nextQuestion();
+      q = f.q = nextQuestion();
       $('#qcat').textContent = CATS[q.cat].icon + ' ' + CATS[q.cat].name;
       $('#q').textContent = q.q;
-      $('#status').textContent = state.chaser.emoji + ' חושב…';
+      $('#status').textContent = f.status = state.chaser.emoji + ' חושב…';
       $('#status').className = 'chip chip-chaser';
       /* מנחה אנושי מסמן אם הצ׳ייסר צדק — ולשם כך הוא חייב לראות את התשובה.
          כשהמחשב עונה אין מה לשפוט, ולכן התשובה נשארת מוסתרת עד הגילוי. */
@@ -2285,12 +2339,12 @@ Screens.finalChaser = {
 
       if (ok){
         f.chaserSteps++;
-        $('#status').textContent = '✔ הצ׳ייסר צדק';
+        $('#status').textContent = f.status = '✔ הצ׳ייסר צדק';
         Sound.stepChaser(); paintLadder();
         if (f.chaserSteps >= f.teamSteps) return end('chaser');
         addTimeout(ask, T(850));
       } else {
-        $('#status').textContent = '✘ הצ׳ייסר טעה — הזדמנות לדחיפה!';
+        $('#status').textContent = f.status = '✘ הצ׳ייסר טעה — הזדמנות לדחיפה!';
         $('#status').className = 'chip chip-player';
         Sound.wrong();
         addTimeout(pushback, T(550));
@@ -2413,6 +2467,7 @@ Screens.results = {
   },
   mount(data){
     mountTopBar();
+    state.outcome = (data && data.outcome) || 'none';
     $('#btn-quit').classList.add('hidden');
     if (data && data.outcome === 'team') Sound.win();
     $('#again').addEventListener('click', () => {
@@ -2424,6 +2479,353 @@ Screens.results = {
   }
 };
 
+</script>
+<script>
+/* ============================================================
+   שני מסכים — מסך הקרנה + קונסולת מנחה
+   המכשיר של המנחה מריץ את המשחק ומשדר את מצב התצוגה כ-presence;
+   מסך ההקרנה רק מצייר את מה שהוא מקבל. presence נמסר אוטומטית
+   למי שמצטרף באיחור ומשוחזר אחרי ניתוק, ולכן אין צורך בשידור חוזר.
+   התשובה הנכונה נכנסת לשידור רק ברגע החשיפה.
+   ============================================================ */
+const Net = {
+  room: null, ready: false, err: null,
+
+  async init(){
+    try {
+      this.room = (window.claude && claude.use) ? await claude.use('room') : null;
+    } catch(e){ this.room = null; }
+    this.ready = !!this.room;
+    return this.ready;
+  },
+
+  /* המנחה משדר את מצב התצוגה */
+  publish(snap){
+    if (!this.room) return;
+    try { this.room.presence({ role: 'host', snap }); } catch(e){}
+  },
+  standby(){
+    if (!this.room) return;
+    try { this.room.presence({ role: 'screen', snap: null }); } catch(e){}
+  },
+
+  /* מסך ההקרנה מאזין למנחה העדכני ביותר */
+  watch(cb){
+    if (!this.room) { cb(null); return () => {}; }
+    const pick = () => {
+      let best = null;
+      for (const p of this.room.peers()){
+        const pr = p.presence;
+        if (pr && pr.role === 'host' && pr.snap && (!best || p.updatedAt > best.updatedAt)) best = p;
+      }
+      cb(best ? best.presence.snap : null);
+    };
+    const un = this.room.onPeers(pick, () => cb(null));
+    pick();
+    return un;
+  }
+};
+
+/* ---------- בניית תמונת המצב לשידור ---------- */
+function buildSnap(){
+  const s = state;
+  const cur = s.players[s.current];
+  const snap = {
+    screen: s.screen,
+    turn: cur ? cur.name : '',
+    chaser: s.chaser ? s.chaser.title : '',
+    players: s.players.map(p => ({ n: p.name, b: p.bank, s: p.status }))
+  };
+  if (s.clock && s.clock.total){
+    snap.clock = { ms: Math.max(0, Math.round(s.clock.left)), total: s.clock.total, run: !!s.clock.running };
+  }
+
+  if (s.screen === 'cash' && s.cash){
+    snap.q    = s.cash.q ? s.cash.q.q : '';
+    snap.cat  = s.cash.q ? CATS[s.cash.q.cat].name : '';
+    snap.bank = s.cash.bank;
+    snap.tally = [s.cash.right, s.cash.wrong, s.cash.passed];
+  }
+  else if (s.screen === 'offer' && cur){
+    snap.bank = cur.bank;
+    snap.offers = makeOffers(cur.bank, s.chaser);
+  }
+  else if (s.screen === 'chase' && s.chase){
+    const c = s.chase;
+    snap.q     = c.q ? c.q.q : '';
+    snap.cat   = c.q ? CATS[c.q.cat].name : '';
+    snap.opts  = c.q ? c.q.shuffled : [];
+    snap.board = { p: c.pos, c: c.cpos, home: HOME, prize: c.prize };
+    snap.qn    = c.qn;
+    snap.phase = c.phase;
+    snap.locked = { p: c.pPick !== null, c: c.cPick !== null };
+    if (c.phase === 'reveal' || c.phase === 'done'){
+      snap.picks = { p: c.pPick, c: c.cPick, right: c.q ? c.q.shuffled.indexOf(c.q.a) : -1 };
+    }
+  }
+  else if ((s.screen === 'finalTeam' || s.screen === 'finalChaser') && s.final){
+    const f = s.final;
+    snap.q    = f.q ? f.q.q : '';
+    snap.cat  = f.q ? CATS[f.q.cat].name : '';
+    snap.steps = { team: f.teamSteps, chaser: f.chaserSteps, head: f.headStart };
+    snap.teamBank = s.teamBank;
+    if (s.screen === 'finalChaser') snap.status = f.status || '';
+    if (f.pushback) snap.pushback = { q: f.q ? f.q.q : '', opts: f.q ? f.q.shuffled : [] };
+  }
+  else if (s.screen === 'results'){
+    snap.outcome  = s.outcome || 'none';
+    snap.teamBank = s.teamBank;
+  }
+  else if (s.screen === 'finalIntro'){
+    snap.teamBank = s.teamBank;
+  }
+
+  /* התשובה משודרת רק אחרי החשיפה */
+  if (Judge.shown && Judge.answer) snap.answer = Judge.answer;
+  return snap;
+}
+
+let snapTimer = null;
+function startBroadcast(){
+  if (snapTimer || state.device !== 'host') return;
+  snapTimer = setInterval(() => {
+    if (state.device === 'host') Net.publish(buildSnap());
+  }, 250);
+}
+
+/* ============================================================
+   בחירת תפקיד המכשיר
+   ============================================================ */
+Screens.role = {
+  html(){
+    return `
+    <div class="hero">
+      <div class="eyebrow mb-2">הצ׳ייסר</div>
+      <h1 class="logo text-5xl sm:text-6xl mb-2">איזה מסך זה?</h1>
+      <p class="muted mb-6 max-w-lg">
+        פתחו את אותו קישור בשני מכשירים: אחד מחובר למקרן או לטלוויזיה, והשני נשאר ביד.
+      </p>
+      <div class="grid gap-3 w-full max-w-lg">
+        <button class="card-pick" id="r-screen">
+          <div class="row"><span class="text-2xl">📺</span><b class="text-lg">מסך הקרנה</b></div>
+          <div class="muted text-sm mt-1">המכשיר שמחובר למקרן. מציג לוח, שעון וכסף — בלי תשובות ובלי כפתורים.</div>
+        </button>
+        <button class="card-pick" id="r-host">
+          <div class="row"><span class="text-2xl">📱</span><b class="text-lg">מסך מנחה</b></div>
+          <div class="muted text-sm mt-1">הטלפון שביד. מריץ את המשחק, רואה את התשובות ושולט בהכול.</div>
+        </button>
+        <button class="card-pick" id="r-solo">
+          <div class="row"><span class="text-2xl">🎮</span><b class="text-lg">מסך אחד</b></div>
+          <div class="muted text-sm mt-1">כמו עד היום — הכול על מכשיר אחד.</div>
+        </button>
+      </div>
+      <p class="muted text-xs mt-6" id="r-note"></p>
+    </div>`;
+  },
+  mount(){
+    const note = $('#r-note');
+    note.textContent = Net.ready
+      ? 'שני המכשירים כבר מחוברים זה לזה.'
+      : 'אין חיבור בין מכשירים כאן — אפשר לשחק על מסך אחד.';
+    $('#r-screen').disabled = !Net.ready;
+    $('#r-host').disabled   = !Net.ready;
+    if (!Net.ready){
+      $('#r-screen').style.opacity = $('#r-host').style.opacity = '.4';
+      $('#r-screen').style.cursor  = $('#r-host').style.cursor  = 'not-allowed';
+    }
+    $('#r-solo').addEventListener('click', () => { state.device = 'solo'; Sound.init(); go('menu'); });
+    $('#r-host').addEventListener('click', () => {
+      state.device = 'host'; Sound.init(); startBroadcast(); go('menu');
+    });
+    $('#r-screen').addEventListener('click', () => { state.device = 'screen'; Net.standby(); go('projector'); });
+  }
+};
+
+/* ============================================================
+   מסך ההקרנה — קורא בלבד
+   ============================================================ */
+Screens.projector = {
+  html(){
+    return `<div id="proj" class="proj"><div class="proj-wait">
+      <div class="eyebrow mb-3">מסך הקרנה</div>
+      <div class="logo proj-big">מחכים למנחה…</div>
+      <p class="muted mt-4">פתחו את אותו קישור בטלפון ובחרו <b>מסך מנחה</b>.</p>
+    </div></div>`;
+  },
+  mount(){
+    const root = $('#proj');
+    const back = document.createElement('button');
+    back.className = 'proj-exit'; back.textContent = 'החלפת תפקיד';
+    back.addEventListener('click', () => { state.device = 'solo'; go('role'); });
+    APP().appendChild(back);
+    let last = '';
+    const un = Net.watch(snap => {
+      const key = JSON.stringify(snap);
+      if (key === last) return;
+      last = key;
+      root.innerHTML = snap ? projectorHtml(snap) : Screens.projector.html().replace(/^<div id="proj" class="proj">|<\/div>$/g, '');
+    });
+    addCleanup(un);
+    /* השעון רץ מקומית בין עדכונים כדי שהספירה תהיה חלקה */
+    const tick = addInterval(() => {
+      const el = $('#proj-clock');
+      if (!el || !el.dataset.run) return;
+      const ends = +el.dataset.ends;
+      const left = Math.max(0, ends - Date.now());
+      el.textContent = el.dataset.fmt === 'mmss' ? mmss(left) : Math.ceil(left / 1000);
+    }, 200);
+    addCleanup(() => clearInterval(tick));
+  }
+};
+
+function projClock(snap, fmt){
+  if (!snap.clock) return '';
+  const ends = Date.now() + snap.clock.ms;
+  const txt = fmt === 'mmss' ? mmss(snap.clock.ms) : Math.ceil(snap.clock.ms / 1000);
+  const pct = snap.clock.total ? (snap.clock.ms / snap.clock.total) * 100 : 0;
+  return { ends, txt, pct, run: snap.clock.run };
+}
+
+function standings(snap){
+  return (snap.players || []).map(p => {
+    const cls = p.s === 'safe' ? 'chip-gold' : p.s === 'out' ? 'chip-chaser' : '';
+    const tag = p.s === 'safe' ? money(p.b) : p.s === 'out' ? 'נתפס' : 'ממתין';
+    return `<span class="chip ${cls}">${esc(p.n)} · ${tag}</span>`;
+  }).join(' ');
+}
+
+function projectorHtml(s){
+  const head = (title, right) => `
+    <div class="proj-head">
+      <div class="row">${standings(s)}</div>
+      <div class="row">${right || ''}<span class="eyebrow">${esc(title)}</span></div>
+    </div>`;
+
+  if (s.screen === 'cash'){
+    const c = projClock(s, 'sec');
+    return `
+    ${head('צבירת כסף')}
+    <div class="proj-body proj-cash">
+      <div class="proj-side">
+        <div class="ring proj-ring ${c && c.ms < 10000 ? 'urgent' : ''}" style="--p:${c ? c.pct : 100}">
+          <b id="proj-clock" data-ends="${c ? c.ends : 0}" data-run="${c && c.run ? 1 : ''}" data-fmt="sec">${c ? c.txt : ''}</b>
+        </div>
+        <div class="proj-who">${esc(s.turn)}</div>
+        <div class="proj-money">${money(s.bank || 0)}</div>
+        <div class="eyebrow">1,000 ₪ לכל תשובה נכונה</div>
+      </div>
+      <div class="proj-q-wrap">
+        <div class="row"><span class="chip">${esc(s.cat || '')}</span></div>
+        <div class="proj-q">${esc(s.q || '')}</div>
+        ${s.answer ? `<div class="proj-answer">${esc(s.answer)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  if (s.screen === 'chase' && s.board){
+    let slots = '';
+    for (let i = 0; i <= s.board.home; i++){
+      const cls = i === 0 ? 'chaserrow' : (i === s.board.home ? 'home' : '');
+      const lbl = i === 0 ? 'הצ׳ייסר' : (i === s.board.home ? '🏠 הבית' : String(i));
+      slots += `<div class="slot ${cls}">
+        <div class="lane lane-c">${i === s.board.c ? '<span class="tok tok-c">😈</span>' : ''}</div>
+        <div>${lbl}</div>
+        <div class="lane lane-p">${i === s.board.p ? `<span class="tok tok-p">${esc(s.turn)}</span>` : ''}</div>
+      </div>`;
+    }
+    const opts = (s.opts || []).map((o, i) => {
+      let k = '';
+      if (s.picks){
+        if (i === s.picks.right) k = 'right';
+        else if (i === s.picks.p || i === s.picks.c) k = 'wrongpick';
+      }
+      const who = s.picks
+        ? `${i === s.picks.p ? '<span class="chip chip-player">אתם</span>' : ''}${i === s.picks.c ? '<span class="chip chip-chaser">צ׳ייסר</span>' : ''}`
+        : '';
+      return `<div class="opt ${k}"><span class="badge">${LETTERS[i]}</span><span>${esc(o)}</span><span class="who">${who}</span></div>`;
+    }).join('');
+
+    return `
+    ${head('המרדף האישי', `<span class="chip chip-gold">על הכף: ${money(s.board.prize)}</span>`)}
+    <div class="proj-body proj-chase">
+      <div class="board proj-board">${slots}</div>
+      <div class="proj-q-wrap">
+        <div class="row">
+          <span class="chip">${esc(s.cat || '')}</span>
+          ${s.locked && s.locked.p ? '<span class="chip chip-player">🔒 נעלתם</span>' : ''}
+          ${s.locked && s.locked.c ? '<span class="chip chip-chaser">🔒 הצ׳ייסר נעל</span>' : ''}
+        </div>
+        <div class="proj-q">${esc(s.q || '')}</div>
+        <div class="proj-opts">${opts}</div>
+      </div>
+    </div>`;
+  }
+
+  if (s.screen === 'finalTeam' || s.screen === 'finalChaser'){
+    const c = projClock(s, 'mmss');
+    const st = s.steps || { team: 0, chaser: 0 };
+    const chasing = s.screen === 'finalChaser';
+    let rungs = '';
+    for (let i = 1; i <= Math.max(1, st.team); i++){
+      rungs += `<div class="step ${chasing && i <= st.chaser ? 'caught' : 'team'}">
+        <span>${i}</span><span>${chasing && i === st.chaser ? '😈' : ''}</span></div>`;
+    }
+    return `
+    ${head(chasing ? 'המרדף הסופי — תור הצ׳ייסר' : 'המרדף הסופי — התור שלכם',
+           `<span class="chip chip-gold">${money(s.teamBank || 0)}</span>`)}
+    <div class="proj-body proj-final">
+      <div class="ladder proj-ladder">${rungs}</div>
+      <div class="proj-q-wrap">
+        <div class="row">
+          <b class="proj-clock" id="proj-clock" data-ends="${c ? c.ends : 0}" data-run="${c && c.run ? 1 : ''}" data-fmt="mmss">${c ? c.txt : '2:00'}</b>
+          ${chasing ? `<span class="chip chip-chaser">${esc(s.status || '😈 חושב…')}</span>`
+                    : `<span class="chip chip-player">${st.team} צעדים</span>`}
+        </div>
+        <div class="proj-q">${esc(s.q || '')}</div>
+        ${s.answer ? `<div class="proj-answer">${esc(s.answer)}</div>` : ''}
+      </div>
+    </div>`;
+  }
+
+  if (s.screen === 'offer'){
+    const o = s.offers || {};
+    return `
+    ${head('המרדף האישי')}
+    <div class="proj-body proj-center">
+      <div class="eyebrow">${esc(s.turn)} צבר/ה</div>
+      <div class="proj-money proj-huge">${money(s.bank || 0)}</div>
+      <div class="row justify-center" style="gap:18px;margin-top:22px">
+        <span class="chip chip-player">נמוכה · ${money(o.low || 0)}</span>
+        <span class="chip chip-gold">${money(o.mid || 0)}</span>
+        <span class="chip chip-chaser">גבוהה · ${money(o.high || 0)}</span>
+      </div>
+      <p class="muted mt-3">בוחרים הצעה…</p>
+    </div>`;
+  }
+
+  if (s.screen === 'results'){
+    const won = s.outcome === 'team';
+    return `
+    ${head('סוף המשחק')}
+    <div class="proj-body proj-center">
+      <div class="proj-huge">${won ? '🏆' : '😈'}</div>
+      <div class="logo proj-big">${won ? 'ניצחתם את הצ׳ייסר!' : 'הצ׳ייסר ניצח'}</div>
+      <div class="proj-money proj-huge">${money(won ? (s.teamBank || 0) : 0)}</div>
+    </div>`;
+  }
+
+  /* ready / menu / setup / finalIntro — מסך המתנה */
+  return `
+  ${head('הצ׳ייסר')}
+  <div class="proj-body proj-center">
+    <div class="eyebrow mb-2">${s.screen === 'finalIntro' ? 'המרדף הסופי' : 'מתכוננים'}</div>
+    <div class="logo proj-big">${esc(s.turn || 'הצ׳ייסר')}</div>
+    ${s.teamBank ? `<div class="proj-money">${money(s.teamBank)}</div>` : ''}
+    <p class="muted mt-4">${esc(s.chaser || '')}</p>
+  </div>`;
+}
+</script>
+<script>
 /* ============================================================
    הפעלה
    ============================================================ */
@@ -2433,10 +2835,16 @@ window.addEventListener('DOMContentLoaded', () => {
   const unlock = () => { Sound.init(); Sound.resume(); };
   window.addEventListener('pointerdown', unlock, { once: true });
   window.addEventListener('keydown', unlock, { once: true });
+
+  /* ערוץ בין מכשירים מגיע מאוחר יותר, אם בכלל. עד אז המשחק כבר עובד
+     על מסך אחד; ברגע שהוא זמין מציעים לבחור תפקיד למכשיר. */
+  Net.init().then(ok => {
+    if (ok && state.screen === 'menu' && state.device === 'solo') go('role');
+  });
 });
 
 /* וו לבדיקות אוטומטיות */
-window.__chase = { state, go, Screens, Sound, CHASERS, RAW, CATS, buildPool, makeOffers };
+window.__chase = { state, go, Screens, Sound, CHASERS, RAW, CATS, buildPool, makeOffers, Net, buildSnap, projectorHtml };
 </script>
 </body>
 </html>
