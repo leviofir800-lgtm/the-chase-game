@@ -89,7 +89,7 @@ async function playChase(page, { win }){
 async function startGame(page, { device = 'solo', players = 1, names = [], level = 'medium',
                                  host = 'ai', ans = 'host' } = {}){
   await page.waitForSelector('[data-dev]');
-  if (device !== 'solo') await page.waitForFunction(() => !document.querySelector('[data-dev="host"]').disabled);
+  if (device !== 'solo') await page.waitForSelector('[data-dev="host"]', { state: 'visible' });
   await page.click(`[data-dev="${device}"]`);
   await page.click('#f-next');
 
@@ -310,6 +310,27 @@ async function runFlow(){
   const soloLive = await page.evaluate(() => !document.querySelector('[data-dev="solo"]').disabled);
   soloLive ? ok('"מסך אחד" זמין גם בלי חיבור בין מכשירים')
            : fail('"מסך אחד" לא זמין');
+
+  // מי שאין לו חיבור בין מכשירים: אפשרות אחת ברורה, בלי כפתורים מושבתים
+  await page.waitForFunction(() => document.getElementById('f-net').textContent.includes('מסך אחד'));
+  const noChannel = await page.evaluate(() => {
+    const all = [...document.querySelectorAll('[data-dev]')];
+    return {
+      visible:  all.filter(b => b.offsetParent !== null).length,
+      disabled: all.filter(b => b.disabled).length,
+      preset:   window.__chase.state.device,
+      note:     document.getElementById('f-net').textContent.trim()
+    };
+  });
+  (noChannel.visible === 1 && noChannel.disabled === 0)
+    ? ok('בלי חיבור בין מכשירים מוצגת אפשרות אחת, בלי כפתורים מושבתים')
+    : fail('מצב ללא חיבור: ' + JSON.stringify(noChannel));
+  noChannel.preset === 'solo'
+    ? ok('"מסך אחד" נבחר מראש כשאין אפשרות אחרת')
+    : fail('לא נבחר מראש: ' + noChannel.preset);
+  noChannel.note.length > 30
+    ? ok('מוסבר למה אין חלוקה בין מסכים')
+    : fail('ההסבר חסר: ' + noChannel.note);
 
   // מסך אחד עובר את כל חמשת השלבים, כולל שלב התשובות
   await page.click('[data-dev="solo"]');

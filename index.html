@@ -2347,7 +2347,8 @@ const FLOW = {
       { id:'players', name:'השחקנים' },
       { id:'chaser',  name:'הצ׳ייסר' },
       { id:'topics',  name:'הנושאים' },
-      ...(state.device === 'solo' ? [{ id:'display', name:'התשובות' }] : [])
+      /* לפני שנבחר מכשיר מציגים את המסלול של "מסך אחד", כדי שהפס לא יקפוץ */
+      ...(!state.device || state.device === 'solo' ? [{ id:'display', name:'התשובות' }] : [])
     );
   },
   draft(){
@@ -2415,13 +2416,14 @@ Screens.start = {
         <p class="muted text-sm">כל מכשיר פותח את אותו קישור ובוחר את התפקיד שלו.</p>
         <div class="grid gap-2">
           ${card('solo',   '🎮', 'מסך אחד',      'הכול על המכשיר הזה — הדרך הפשוטה.')}
-          <div id="f-multi" class="grid gap-2">
+          <div id="f-multi" class="grid gap-2 hidden">
+            <div class="eyebrow mt-1">או בכמה מכשירים יחד</div>
             ${card('host',   '📱', 'מסך מנחה',    'הטלפון שמריץ את המשחק, רואה תשובות ושולט.')}
             ${card('screen', '📺', 'מסך הקרנה',   'הטלוויזיה או המקרן. לוח, שעון וכסף — בלי תשובות.')}
             ${card('chaser', '😈', 'מסך הצ׳ייסר', 'הטלפון של מי שמשחק את הנבל. שאלה ואפשרויות בלבד.')}
           </div>
         </div>
-        <p class="muted text-xs" id="f-net">מחפש מכשירים אחרים…</p>
+        <p class="muted text-xs" id="f-net">בודק אם אפשר לחבר מכשירים נוספים…</p>
       </div>`;
     }
 
@@ -2531,26 +2533,28 @@ Screens.start = {
 
     /* ---------- שלב המסך ---------- */
     if (step.id === 'screen'){
-      const note = $('#f-net');
-      const multi = $$('#f-multi [data-dev]');
-      const setEnabled = on => multi.forEach(b => {
-        b.disabled = !on;
-        b.style.opacity = on ? '' : '.4';
-        b.style.cursor  = on ? '' : 'not-allowed';
-      });
-      setEnabled(Net.ready);
-      if (Net.ready) note.textContent = 'מכשירים אחרים יכולים להצטרף עכשיו.';
-      else {
-        note.textContent = 'מחפש מכשירים אחרים…';
-        Net.init().then(ok => {
-          const el = $('#f-net');
-          if (!el) return;
-          setEnabled(ok);
-          el.textContent = ok
-            ? 'מכשירים אחרים יכולים להצטרף עכשיו.'
-            : 'אין חיבור בין מכשירים כאן — אפשר לשחק על מסך אחד.';
-        });
-      }
+      /* משחק בכמה מכשירים אפשרי רק כשהדפדפן הזה יכול להתחבר לחדר —
+         בקישור המתארח, למי שמחובר לאותו חשבון/ארגון. כשזה לא אפשרי
+         לא מציגים כפתורים מושבתים אלא פשוט מסבירים; מסך אחד הוא משחק מלא. */
+      const show = ok => {
+        const box = $('#f-multi'), el = $('#f-net');
+        if (!box || !el) return;
+        box.classList.toggle('hidden', !ok);
+        el.textContent = ok
+          ? 'אפשר לצרף עכשיו עוד מכשירים לאותו קישור.'
+          : 'במכשיר הזה המשחק רץ על מסך אחד — וזה המשחק המלא. ' +
+            'חלוקה בין מסך הקרנה לטלפון דורשת שכל המכשירים יהיו מחוברים לאותו חשבון.';
+        /* כשיש רק אפשרות אחת אין טעם לבקש לבחור בה — בוחרים מראש */
+        if (!ok && !state.device){
+          state.device = 'solo';
+          const solo = document.querySelector('[data-dev="solo"]');
+          if (solo) solo.classList.add('on');
+          const nx = $('#f-next');
+          if (nx) nx.textContent = 'הבא ←';
+        }
+      };
+      if (Net.ready) show(true);
+      else Net.init().then(show);
 
       bind('[data-dev]', 'click', e => {
         state.device = e.currentTarget.dataset.dev;
